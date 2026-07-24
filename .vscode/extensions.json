@@ -1,0 +1,6 @@
+{
+    "recommendations": [
+        "vscjava.vscode-gradle",
+        "dart-code.flutter"
+    ]
+}
