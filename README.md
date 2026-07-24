@@ -282,11 +282,12 @@ Fetched at runtime (not redistributed by this repo):
   credits; fine for light personal use, but check Esri's terms before any
   distribution.
 - JARTIC: terms limit the site/data to private use - fine for a personal
-  tool; **ask JARTIC before distributing the app publicly**. The endpoints are
+  tool; **do not distribute the app or its data for commercial purposes** (the
+  code licence is noncommercial for the same reason). The endpoints are
   undocumented and may change.
 - MLIT 道路情報提供システム: government content, attribution required.
 
-Bundled in the repo (generated data, not MIT-licensed):
+Bundled in the repo (generated data, not covered by the code licence):
 
 - `lib/map/japan_outline.g.dart` - prefecture boundary skeleton derived from
   Global Map Japan (地球地図日本, © 国土地理院/GSI,
