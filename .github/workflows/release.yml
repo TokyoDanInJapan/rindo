@@ -1,0 +1,100 @@
+name: Release
+
+# Builds the signed, distributable APKs via tool/release.sh and, on a v* tag,
+# attaches them to the GitHub Release for that tag. workflow_dispatch runs
+# build the same signed APKs but only upload them as a run artifact.
+#
+# Needs two secrets in the 'release' environment
+# (Settings -> Environments -> release):
+#   KEYSTORE_BASE64     base64 of the release keystore:
+#                         base64 -w0 ~/keystores/rindo-release.jks
+#   KEYSTORE_PASSWORD   the keystore password, raw/unescaped (the workflow
+#                       handles .properties escaping)
+
+on:
+  workflow_dispatch: # signed build on demand, artifact only
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write # create the release and upload its assets
+
+jobs:
+  release:
+    name: Build signed APKs
+    runs-on: ubuntu-latest
+    # The signing secrets live in the 'release' environment, not in repo
+    # secrets - without this line they resolve to empty strings.
+    environment: release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Pinned to the version this repo builds with locally.
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: 3.44.6
+          channel: stable
+          cache: true
+
+      # A v* tag must match pubspec.yaml's version - the APK announces the
+      # pubspec version regardless of what the tag says.
+      - name: Check tag matches pubspec version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version=$(sed -n 's/^version: *\([0-9][^+ ]*\)+.*/\1/p' pubspec.yaml)
+          tag=${GITHUB_REF_NAME#v}
+          if [ "$version" != "$tag" ]; then
+            echo "Tag v$tag != pubspec version $version - bump pubspec.yaml" >&2
+            exit 1
+          fi
+
+      - name: Restore signing config
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "KEYSTORE_BASE64 / KEYSTORE_PASSWORD secrets not set" >&2
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/rindo-release.jks"
+          # Backslashes must be doubled for Java's .properties parser.
+          escaped="${KEYSTORE_PASSWORD//\\/\\\\}"
+          {
+            echo "storeFile=$RUNNER_TEMP/rindo-release.jks"
+            echo "storePassword=$escaped"
+            echo "keyAlias=rindo"
+            echo "keyPassword=$escaped"
+          } > android/key.properties
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Test
+        run: flutter test
+
+      - name: Build signed APKs
+        run: tool/release.sh
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rindo-signed-apks
+          path: build/release/*
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          files: build/release/*
+          generate_release_notes: true
