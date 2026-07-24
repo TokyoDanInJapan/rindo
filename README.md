@@ -1,5 +1,7 @@
 # Rindo
 
+[![Build APK](https://github.com/TokyoDanInJapan/rindo/actions/workflows/build-apk.yml/badge.svg)](https://github.com/TokyoDanInJapan/rindo/actions/workflows/build-apk.yml)
+
 Touring companion for Japan: JMA rain radar, road closures, and seasonal
 gates on a rider-centred map.
 Flutter (Android now; the iOS scaffold is in place for later).
