@@ -8,6 +8,7 @@ import 'package:latlong2/latlong.dart';
 import '../../jma/jma_api.dart';
 import '../../map/japan_outline.g.dart';
 import '../../closures/road_closure.dart';
+import '../../net/rekey_safe_tile_provider.dart';
 import 'closure_presentation.dart';
 import 'closures_controller.dart';
 import 'disclaimer.dart';
@@ -110,7 +111,11 @@ class RadarMapView extends StatelessWidget {
   // only on a full restart. Live radar doesn't need cross-session tile caching
   // anyway. Cheap to build per rebuild: the client is injected, so no client
   // is created and layer disposal doesn't close it.
-  TileProvider _tileProvider() => NetworkTileProvider(
+  //
+  // RekeySafeTileProvider handles the *other* process-wide cache in the tile
+  // path - Flutter's own image cache - where a re-key would otherwise leave
+  // every in-flight tile permanently blank. See that file.
+  TileProvider _tileProvider() => RekeySafeTileProvider(
     httpClient: httpClient,
     cachingProvider: const DisabledMapCachingProvider(),
   );
