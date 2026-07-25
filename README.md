@@ -56,10 +56,16 @@ device stacks JMA's transparent radar tiles over an OSM base map itself.
   precede the actual road closures by hours. Regenerate the municipality
   coordinate table with `tool/prep_municipalities.dart` after big mergers.
 - **Weather report** - tap the rider dot (or a dropped pin) for JMA's area
-  forecast where you're standing: today and tomorrow's weather in JMA's own
-  wording, highs/lows, 6-hourly rain chances, wind and wave heights, and the
-  prose outlook, plus any warning headline. The radar says what the rain is
-  doing in the next hour; this says whether to set off at all. Forecasts are
+  forecast where you're standing, laid out as JMA's own page lays it out: a
+  near-term table (icon and temperatures per day, rain chance in fixed
+  00-06/06-12/12-18/18-24 blocks) and the 週間予報 week-ahead table (weather,
+  rain chance, high/low and JMA's own A/B/C confidence grade), with JMA's
+  wording and prose outlook below and any warning headline on top. Weather
+  icons come from JMA's 3-digit 天気コード, bucketed by its leading digit
+  (1 晴れ, 2 くもり, 3 雨, 4 雪) - JMA publishes ~130 codes but no
+  machine-readable table for them, so the icon stays coarse on purpose and the
+  wording beside it carries the detail. The radar says what the rain is doing
+  in the next hour; this says whether to set off at all. Forecasts are
   keyed by JMA area code rather than coordinates, so a position is resolved
   through the nearest municipality to its class10 subdivision (千葉県北東部,
   not just "Chiba") - regenerate that table with

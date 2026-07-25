@@ -52,7 +52,12 @@ WeatherReport _report({String? headline}) => WeatherReport(
     WeatherDay(at: DateTime.utc(2026, 7, 25, 15), weather: 'くもり'),
   ],
   rain: [RainChance(at: DateTime.utc(2026, 7, 24, 21), percent: 10)],
+  week: [
+    WeeklyDay(at: _weekDay, code: '200', pop: 30, tempMax: 29, tempMin: 24),
+  ],
 );
+
+final _weekDay = DateTime.utc(2026, 7, 26, 15);
 
 void main() {
   test('place names come from JMA, not the model', () async {

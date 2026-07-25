@@ -30,6 +30,7 @@ Future<WeatherReport> translateReport(
       (d) async => WeatherDay(
         at: d.at,
         weather: await translator.translateText(d.weather),
+        code: d.code,
         wind: await maybe(d.wind),
         wave: await maybe(d.wave),
         tempMax: d.tempMax,
@@ -58,5 +59,8 @@ Future<WeatherReport> translateReport(
     overview: overview,
     days: days,
     rain: r.rain,
+    // Codes and numbers - nothing to translate, and the table's labels are
+    // already English.
+    week: r.week,
   );
 }

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../jma/jma_forecast.dart';
+import 'weather_presentation.dart';
 
 /// What tapping a place on the map offers. Weather is the reason it exists;
 /// clearing the pin used to be the pin's own tap action, so it moves in here
@@ -88,7 +89,9 @@ void showWeatherSheet(
     isScrollControlled: true,
     builder: (ctx) => DraggableScrollableSheet(
       expand: false,
-      initialChildSize: 0.6,
+      // Two tables plus the wording need the room; the rider can still drag it
+      // up to 0.9 or down out of the way.
+      initialChildSize: 0.7,
       maxChildSize: 0.9,
       builder: (ctx, scroll) => FutureBuilder<WeatherReport>(
         future: pending,
@@ -270,29 +273,48 @@ class _Report extends StatelessWidget {
             ),
           ),
         ],
-        const SizedBox(height: 8),
-        for (final day in report.days)
-          _Day(
-            day: day,
-            label: _dayLabel(jstDate(day.at), today),
-            rain: rainByDay[jstDate(day.at)] ?? const [],
+        _Section(
+          title: 'Forecast',
+          child: _NearTerm(
+            days: report.days,
+            rainByDay: rainByDay,
+            label: (d) => _dayLabel(d, today),
           ),
-        if (report.overview.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          Text('Outlook', style: text.titleSmall),
-          const SizedBox(height: 4),
-          Text(report.overview, style: text.bodyMedium),
-        ],
-        const SizedBox(height: 16),
-        Text(
-          '${report.office} · issued ${jstHhmm(report.reportedAt)} JST',
-          style: text.bodySmall,
         ),
-        const SizedBox(height: 12),
-        FilledButton.icon(
-          icon: const Icon(Icons.open_in_new),
-          label: const Text('Source: 気象庁 天気予報'),
-          onPressed: () => onOpenSource(report.sourceUrl),
+        _Section(
+          title: 'Day by day',
+          child: _Wording(
+            days: report.days,
+            label: (d) => _dayLabel(d, today),
+          ),
+        ),
+        if (report.week.isNotEmpty)
+          _Section(
+            title: 'Week ahead',
+            child: _WeekTable(week: report.week),
+          ),
+        if (report.overview.isNotEmpty)
+          _Section(
+            title: 'Outlook',
+            child: Text(report.overview, style: text.bodyMedium),
+          ),
+        _Section(
+          title: 'Source',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${report.office} · issued ${jstHhmm(report.reportedAt)} JST',
+                style: text.bodySmall,
+              ),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                icon: const Icon(Icons.open_in_new),
+                label: const Text('気象庁 天気予報'),
+                onPressed: () => onOpenSource(report.sourceUrl),
+              ),
+            ],
+          ),
         ),
       ],
     );
@@ -311,67 +333,304 @@ class _Report extends StatelessWidget {
   }
 }
 
-class _Day extends StatelessWidget {
-  const _Day({required this.day, required this.label, required this.rain});
+/// One titled block, ruled off from the one above it.
+///
+/// The sheet stacks five kinds of thing that look alike at a glance - two
+/// tables of numbers, two runs of Japanese prose, and the attribution - so
+/// without a rule between them a thumb-scroll reads as one long column and it
+/// stops being obvious which numbers belong to which day range. The line does
+/// the separating; the title says what you're looking at.
+class _Section extends StatelessWidget {
+  const _Section({required this.title, required this.child});
 
-  final WeatherDay day;
-  final String label;
-  final List<RainChance> rain;
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const SizedBox(height: 16),
+      const Divider(height: 1),
+      const SizedBox(height: 12),
+      Text(
+        title,
+        // Quiet and lettered-out: a signpost, not a competitor for the
+        // forecast underneath it.
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+          letterSpacing: 1.1,
+          color: Theme.of(context).colorScheme.primary,
+        ),
+      ),
+      const SizedBox(height: 8),
+      child,
+    ],
+  );
+}
+
+/// Anything from "likely" upward is the number a rider changes plans over.
+const _notableRain = 50;
+
+/// The 6-hour blocks JMA reports rain chance in, as its own page columns them.
+/// Fixed rather than derived from the response: a block that has already passed
+/// is simply dropped from the data, and a table whose columns move about
+/// between morning and afternoon is harder to read than one with a gap in it.
+const _rainBlocks = [0, 6, 12, 18];
+
+/// The chance published for the block starting at [hour], or null if JMA no
+/// longer reports it (the block has passed).
+int? _popAt(List<RainChance>? day, int hour) {
+  for (final r in day ?? const <RainChance>[]) {
+    if (jstHour(r.at) == hour) return r.percent;
+  }
+  return null;
+}
+
+TextStyle? _rainStyle(TextTheme text, int? percent) => text.bodyMedium?.copyWith(
+  fontWeight: (percent ?? 0) >= _notableRain
+      ? FontWeight.bold
+      : FontWeight.normal,
+  color: (percent ?? 0) >= _notableRain ? Colors.blue.shade700 : null,
+);
+
+Widget _cell(Widget child, {Alignment align = Alignment.center}) => Padding(
+  padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 6),
+  child: Align(alignment: align, child: child),
+);
+
+/// Today and tomorrow, laid out the way JMA's own page does: a column per day
+/// carrying the icon and temperatures, then rain chance as a grid of fixed
+/// 6-hour blocks.
+///
+/// JMA's wording is the one thing that does *not* go in a cell - 「くもり時々晴
+/// れ夜のはじめ頃一時雨所により夕方から雷を伴い激しく降る」in a column two
+/// fingers wide is a vertical smear. It sits under the table instead, where it
+/// stays a sentence, which is what makes it worth more than the icon above it.
+class _NearTerm extends StatelessWidget {
+  const _NearTerm({
+    required this.days,
+    required this.rainByDay,
+    required this.label,
+  });
+
+  final List<WeatherDay> days;
+  final Map<(int, int), List<RainChance>> rainByDay;
+  final String Function((int, int)) label;
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    final detail = [
-      if (day.wind case final wind? when wind.isNotEmpty) 'Wind: $wind',
-      if (day.wave case final wave? when wave.isNotEmpty) 'Waves: $wave',
-    ];
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _scrollable(
+          Table(
+            defaultColumnWidth: const FixedColumnWidth(96),
+            columnWidths: const {0: IntrinsicColumnWidth()},
             children: [
-              Text(label, style: text.titleSmall),
-              const Spacer(),
-              if (day.tempMax != null || day.tempMin != null)
-                Text(
-                  [
-                    if (day.tempMax case final max?) '↑$max°',
-                    if (day.tempMin case final min?) '↓$min°',
-                  ].join('  '),
-                  style: text.titleSmall,
-                ),
-            ],
-          ),
-          Text(day.weather, style: text.bodyMedium),
-          if (rain.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Wrap(
-                spacing: 12,
+              TableRow(
                 children: [
-                  for (final r in rain)
-                    Text(
-                      '${jstHhmm(r.at)} ${r.percent}%',
-                      style: text.bodySmall?.copyWith(
-                        // Anything from "likely" upward is the number a rider
-                        // changes plans over, so let it carry weight.
-                        fontWeight: r.percent >= 50
-                            ? FontWeight.bold
-                            : FontWeight.normal,
-                        color: r.percent >= 50 ? Colors.blue.shade700 : null,
+                  _cell(const SizedBox.shrink()),
+                  for (final d in days)
+                    _cell(
+                      Text(label(jstDate(d.at)), style: text.titleSmall),
+                    ),
+                ],
+              ),
+              TableRow(
+                children: [
+                  _cell(Text('Weather', style: text.bodySmall)),
+                  for (final d in days)
+                    _cell(
+                      Icon(
+                        weatherIcon(d.code),
+                        color: weatherColor(d.code, context),
+                        size: 30,
                       ),
                     ),
                 ],
               ),
-            ),
-          if (detail.isNotEmpty)
-            Text(detail.join(' · '), style: text.bodySmall),
+              TableRow(
+                children: [
+                  _cell(Text('Temp', style: text.bodySmall)),
+                  for (final d in days)
+                    _cell(
+                      Text(
+                        [
+                          if (d.tempMax case final max?) '↑$max°',
+                          if (d.tempMin case final min?) '↓$min°',
+                        ].join(' '),
+                        style: text.bodyMedium,
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        _scrollable(_rainGrid(context)),
+      ],
+    );
+  }
+
+  Widget _rainGrid(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Table(
+      defaultColumnWidth: const FixedColumnWidth(66),
+      columnWidths: const {0: IntrinsicColumnWidth()},
+      children: [
+        TableRow(
+          children: [
+            _cell(Text('Rain %', style: text.bodySmall)),
+            for (final h in _rainBlocks)
+              _cell(
+                Text(
+                  '${h.toString().padLeft(2, '0')}-'
+                  '${((h + 6) % 24).toString().padLeft(2, '0')}',
+                  style: text.bodySmall,
+                ),
+              ),
+          ],
+        ),
+        for (final d in days)
+          TableRow(
+            children: [
+              _cell(
+                Text(label(jstDate(d.at)), style: text.bodySmall),
+                align: Alignment.centerLeft,
+              ),
+              for (final h in _rainBlocks)
+                _cell(() {
+                  final pop = _popAt(rainByDay[jstDate(d.at)], h);
+                  return Text(
+                    pop == null ? '–' : '$pop',
+                    style: _rainStyle(text, pop),
+                  );
+                }()),
+            ],
+          ),
+      ],
+    );
+  }
+}
+
+/// JMA's wording for each day, kept out of the table above it: 「くもり時々晴れ
+/// 夜のはじめ頃一時雨所により夕方から雷を伴い激しく降る」in a column two fingers
+/// wide is a vertical smear. As a sentence it stays the most informative thing
+/// on the sheet - it's the part an icon can't carry.
+class _Wording extends StatelessWidget {
+  const _Wording({required this.days, required this.label});
+
+  final List<WeatherDay> days;
+  final String Function((int, int)) label;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final d in days) ...[
+          Text(label(jstDate(d.at)), style: text.titleSmall),
+          Text(d.weather, style: text.bodyMedium),
+          if ([
+            if (d.wind case final w? when w.isNotEmpty) 'Wind: $w',
+            if (d.wave case final w? when w.isNotEmpty) 'Waves: $w',
+          ].join(' · ') case final detail when detail.isNotEmpty)
+            Text(detail, style: text.bodySmall),
+          if (d != days.last) const SizedBox(height: 10),
+        ],
+      ],
+    );
+  }
+}
+
+/// The 週間予報: a column per day, all numbers and icons because that is all
+/// JMA publishes this far out.
+class _WeekTable extends StatelessWidget {
+  const _WeekTable({required this.week});
+
+  final List<WeeklyDay> week;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    String temp(int? v) => v == null ? '–' : '$v°';
+
+    return _scrollable(
+      Table(
+        defaultColumnWidth: const FixedColumnWidth(52),
+        columnWidths: const {0: IntrinsicColumnWidth()},
+        children: [
+          TableRow(
+            children: [
+              _cell(const SizedBox.shrink()),
+              for (final d in week)
+                _cell(
+                  Text(
+                    '${jstDate(d.at).$1}/${jstDate(d.at).$2}',
+                    style: text.bodySmall,
+                  ),
+                ),
+            ],
+          ),
+          TableRow(
+            children: [
+              _cell(Text('Weather', style: text.bodySmall)),
+              for (final d in week)
+                _cell(
+                  Icon(
+                    weatherIcon(d.code),
+                    color: weatherColor(d.code, context),
+                    size: 24,
+                  ),
+                ),
+            ],
+          ),
+          TableRow(
+            children: [
+              _cell(Text('Rain %', style: text.bodySmall)),
+              for (final d in week)
+                _cell(
+                  Text(
+                    d.pop == null ? '–' : '${d.pop}',
+                    style: _rainStyle(text, d.pop),
+                  ),
+                ),
+            ],
+          ),
+          TableRow(
+            children: [
+              _cell(Text('Max', style: text.bodySmall)),
+              for (final d in week)
+                _cell(Text(temp(d.tempMax), style: text.bodyMedium)),
+            ],
+          ),
+          TableRow(
+            children: [
+              _cell(Text('Min', style: text.bodySmall)),
+              for (final d in week)
+                _cell(Text(temp(d.tempMin), style: text.bodyMedium)),
+            ],
+          ),
+          TableRow(
+            children: [
+              // JMA's own confidence grade. A forecast five days out with a C
+              // beside it is worth planning around differently to one with an A.
+              _cell(Text('Conf.', style: text.bodySmall)),
+              for (final d in week)
+                _cell(Text(d.reliability ?? '–', style: text.bodySmall)),
+            ],
+          ),
         ],
       ),
     );
   }
 }
+
+/// Tables are wider than a phone once there are more than a couple of columns,
+/// so each scrolls inside its own box rather than forcing the whole sheet
+/// sideways.
+Widget _scrollable(Widget table) =>
+    SingleChildScrollView(scrollDirection: Axis.horizontal, child: table);
