@@ -39,6 +39,11 @@ class RadarMapView extends StatelessWidget {
   /// rotation-only changes, so the screen watches the map event stream.)
   final VoidCallback onCameraGesture;
   final void Function(LatLng) onLongPress;
+
+  /// A tap on the rider dot or the scouting pin - the screen offers the
+  /// weather there (and, for the pin, clearing it).
+  final void Function(LatLng point, {required bool pinned}) onShowPlace;
+
   final void Function(RoadClosure) onShowDetail;
   final void Function(Uri) onOpenUrl;
 
@@ -63,6 +68,7 @@ class RadarMapView extends StatelessWidget {
     required this.initialZoom,
     required this.onCameraGesture,
     required this.onLongPress,
+    required this.onShowPlace,
     required this.onShowDetail,
     required this.onOpenUrl,
     required this.onTileError,
@@ -306,14 +312,28 @@ class RadarMapView extends StatelessWidget {
           if (rider != null)
             Marker(
               point: rider,
-              width: 22,
-              height: 22,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade600,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 3),
-                  boxShadow: const [BoxShadow(blurRadius: 6)],
+              // Twice the dot's size: the visible dot stays 22 px (it marks a
+              // position, and a bigger one would claim precision the fix
+              // doesn't have) but a 22 px tap target on a moving bike is not
+              // one, so the transparent surround takes the tap.
+              width: 44,
+              height: 44,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => onShowPlace(rider, pinned: false),
+                child: Center(
+                  child: SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade600,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 3),
+                        boxShadow: const [BoxShadow(blurRadius: 6)],
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -325,7 +345,7 @@ class RadarMapView extends StatelessWidget {
               // Bottom tip of the glyph sits on the pinned spot.
               alignment: Alignment.topCenter,
               child: GestureDetector(
-                onTap: closures.clearPin,
+                onTap: () => onShowPlace(pin, pinned: true),
                 child: Icon(
                   Icons.place,
                   color: Colors.teal.shade700,

@@ -55,6 +55,20 @@ device stacks JMA's transparent radar tiles over an OSM base map itself.
   markers at the municipality office within the search area. They usually
   precede the actual road closures by hours. Regenerate the municipality
   coordinate table with `tool/prep_municipalities.dart` after big mergers.
+- **Weather report** - tap the rider dot (or a dropped pin) for JMA's area
+  forecast where you're standing: today and tomorrow's weather in JMA's own
+  wording, highs/lows, 6-hourly rain chances, wind and wave heights, and the
+  prose outlook, plus any warning headline. The radar says what the rain is
+  doing in the next hour; this says whether to set off at all. Forecasts are
+  keyed by JMA area code rather than coordinates, so a position is resolved
+  through the nearest municipality to its class10 subdivision (千葉県北東部,
+  not just "Chiba") - regenerate that table with
+  `tool/prep_forecast_areas.dart` if JMA reorganises its forecast areas. In
+  English mode the report translates on device like the closures do, except
+  for place names, which use JMA's own English ("North-eastern Region",
+  "Sapporo City") - machine translation is at its worst exactly where JMA is
+  already authoritative. The Japanese shows immediately and the English swaps
+  in behind it, so a first-run model download never blocks the forecast.
 - **Seasonal winter gates** - a curated, bundled dataset of annual mountain-
   pass closures (渋峠, 麦草峠, 金精峠, 乗鞍 …) with nominal open/close dates,
   drawn as indigo snowflake markers plus the full closed road section
@@ -70,6 +84,9 @@ colour.
 
 - `lib/jma/jma_api.dart` - JMA targetTimes/tile client (port of the proxy's
   `jma.js`; the only file to touch when JMA changes something)
+- `lib/jma/jma_forecast.dart` - JMA area-forecast client behind the weather
+  sheet, plus the generated position → forecast-area table
+  (`forecast_areas.g.dart`)
 - `lib/closures/` - closure model, JARTIC + MLIT sources, curated seasonal
   winter-gate dataset (`seasonal_gates.dart`, update once a year from the
   prefecture notices) with baked OSM road geometry

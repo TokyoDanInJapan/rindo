@@ -46,6 +46,11 @@ class TranslationController extends ChangeNotifier {
   /// the untranslated originals.
   List<RoadClosure> get shown => _english ? _translated : _source;
 
+  /// The on-device translator itself, for text that isn't a closure - the
+  /// weather report. Shared deliberately: it owns the downloaded model and the
+  /// string cache, so a second instance would mean a second ~30 MB download.
+  ClosureTranslator get translator => _translator;
+
   // Translator pass-throughs for the banner.
   TranslatorStatus get translatorStatus => _translator.status.value;
   String? get translatorError => _translator.lastError;

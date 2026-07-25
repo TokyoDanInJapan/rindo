@@ -73,7 +73,10 @@ class ClosureTranslator {
     return _ready;
   }
 
-  Future<String> _translate(String ja) async {
+  /// One string, ja -> en, cached and never throwing: a failed line comes back
+  /// as the original Japanese rather than taking the whole record down with it.
+  /// Callers must [ensureReady] first - this alone won't download the model.
+  Future<String> translateText(String ja) async {
     final cached = _cache[ja];
     if (cached != null) return cached;
     try {
@@ -92,12 +95,12 @@ class ClosureTranslator {
     return RoadClosure(
       id: c.id,
       point: c.point,
-      roadName: await _translate(c.roadName),
-      section: c.section == null ? null : await _translate(c.section!),
-      restriction: await _translate(c.restriction),
-      cause: c.cause == null ? null : await _translate(c.cause!),
-      period: c.period == null ? null : await _translate(c.period!),
-      sourceName: await _translate(c.sourceName),
+      roadName: await translateText(c.roadName),
+      section: c.section == null ? null : await translateText(c.section!),
+      restriction: await translateText(c.restriction),
+      cause: c.cause == null ? null : await translateText(c.cause!),
+      period: c.period == null ? null : await translateText(c.period!),
+      sourceName: await translateText(c.sourceName),
       sourceUrl: c.sourceUrl,
       lines: c.lines,
       validFrom: c.validFrom,

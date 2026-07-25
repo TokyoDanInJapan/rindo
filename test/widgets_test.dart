@@ -30,7 +30,13 @@ Widget _host(Widget child) => MaterialApp(home: Scaffold(body: child));
 
 /// Pumps a full [RadarMapView] with mocked network and closures. URLs the
 /// view asks to open land in [opened].
-Future<MapController> pumpMap(WidgetTester t, {List<Uri>? opened}) async {
+Future<MapController> pumpMap(
+  WidgetTester t, {
+  List<Uri>? opened,
+  LatLng? pin,
+  LatLng? rider,
+  List<(LatLng, bool)>? places,
+}) async {
   final controller = MapController();
   final closures = ClosuresController(
     vsync: const TestVSync(),
@@ -41,6 +47,8 @@ Future<MapController> pumpMap(WidgetTester t, {List<Uri>? opened}) async {
     english: false,
   );
   addTearDown(closures.dispose);
+  if (rider != null) closures.setRider(rider);
+  if (pin != null) closures.dropPin(pin);
   await t.pumpWidget(
     MaterialApp(
       home: RadarMapView(
@@ -66,6 +74,8 @@ Future<MapController> pumpMap(WidgetTester t, {List<Uri>? opened}) async {
         initialZoom: 10,
         onCameraGesture: () {},
         onLongPress: (_) {},
+        onShowPlace: (point, {required pinned}) =>
+            places?.add((point, pinned)),
         onShowDetail: (_) {},
         onOpenUrl: (url) => opened?.add(url),
         onTileError: (_, _, _, _) {},
@@ -674,6 +684,36 @@ void main() {
 
       // Drain the radar layers' staged-mount timer before teardown.
       await t.pump(const Duration(seconds: 2));
+    });
+  });
+
+  group('place taps', () {
+    // The pin used to clear itself on tap; it now opens a menu (weather, or
+    // clear). If the gesture is ever lost in a refactor the pin becomes
+    // undismissable and the weather unreachable, with nothing else to say so.
+    // pumpMap's initial centre, so the marker lands mid-screen where it can
+    // actually be tapped.
+    const spot = LatLng(35, 137);
+
+    testWidgets('tapping the pin reports the pinned spot', (t) async {
+      final places = <(LatLng, bool)>[];
+      await pumpMap(t, pin: spot, places: places);
+      await t.pumpAndSettle();
+
+      await t.tap(find.byIcon(Icons.place));
+      await t.pumpAndSettle();
+      expect(places, [(spot, true)]);
+    });
+
+    testWidgets('tapping the rider dot reports it as unpinned', (t) async {
+      final places = <(LatLng, bool)>[];
+      await pumpMap(t, rider: spot, places: places);
+      await t.pumpAndSettle();
+
+      // The dot has no icon to find; it's the only marker on the map.
+      await t.tap(find.byType(MarkerLayer));
+      await t.pumpAndSettle();
+      expect(places, [(spot, false)]);
     });
   });
 
