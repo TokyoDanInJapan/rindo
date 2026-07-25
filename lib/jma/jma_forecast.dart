@@ -105,6 +105,7 @@ class WeatherDay {
   const WeatherDay({
     required this.at,
     required this.weather,
+    this.code,
     this.wind,
     this.wave,
     this.tempMax,
@@ -114,10 +115,40 @@ class WeatherDay {
   /// Start of the forecast period, as a UTC instant (see [jstHhmm]).
   final DateTime at;
   final String weather;
+
+  /// JMA's 3-digit 天気コード, for the icon (see weather_presentation.dart).
+  final String? code;
+
   final String? wind;
   final String? wave;
   final int? tempMax;
   final int? tempMin;
+}
+
+/// One day of the 週間予報. Numbers and a code, no prose: JMA doesn't write
+/// wording this far out, which is why the weekly view is a table on its page
+/// and a table here.
+class WeeklyDay {
+  const WeeklyDay({
+    required this.at,
+    this.code,
+    this.pop,
+    this.tempMax,
+    this.tempMin,
+    this.reliability,
+  });
+
+  final DateTime at;
+  final String? code;
+
+  /// Chance of rain across the whole day, not a 6-hour block.
+  final int? pop;
+  final int? tempMax;
+  final int? tempMin;
+
+  /// JMA's confidence grade, A (highest) to C. Worth showing: it's the
+  /// difference between planning on a forecast and hoping.
+  final String? reliability;
 }
 
 /// Chance of rain in one 6-hour block - the number a rider actually plans on.
@@ -137,6 +168,7 @@ class WeatherReport {
     required this.overview,
     required this.days,
     required this.rain,
+    required this.week,
   });
 
   final ForecastArea area;
@@ -159,6 +191,10 @@ class WeatherReport {
   final List<WeatherDay> days;
   final List<RainChance> rain;
 
+  /// The week beyond [days]. Days already covered in detail are left out, so
+  /// the two tables don't say the same thing twice.
+  final List<WeeklyDay> week;
+
   /// JMA's own page for this area, for the "read it on JMA" link.
   Uri get sourceUrl => Uri.parse(
     'https://www.jma.go.jp/bosai/forecast/'
@@ -180,6 +216,9 @@ String jstHhmm(DateTime utc) {
   final jst = utc.toUtc().add(const Duration(hours: 9));
   return (jst.month, jst.day);
 }
+
+/// JST hour for a UTC instant - which 6-hour block a rain chance belongs to.
+int jstHour(DateTime utc) => utc.toUtc().add(const Duration(hours: 9)).hour;
 
 class JmaForecastApi {
   JmaForecastApi({http.Client? client}) : _client = client ?? http.Client();
@@ -220,12 +259,18 @@ class JmaForecastApi {
     if (forecast is! List || forecast.isEmpty) {
       throw JmaForecastException('forecast: unexpected shape');
     }
-    return _parse(area, forecast.first, overview);
+    return _parse(
+      area,
+      forecast.first,
+      forecast.length > 1 ? forecast[1] : null,
+      overview,
+    );
   }
 
   WeatherReport _parse(
     ForecastArea area,
     Object? shortTerm,
+    Object? weekly,
     Map<String, dynamic> overview,
   ) {
     if (shortTerm is! Map) {
@@ -263,7 +308,73 @@ class JmaForecastApi {
       overview: _tidy(overview['text'] as String? ?? ''),
       days: days,
       rain: _rain(pops, area.class10),
+      // Only days the detailed block actually put numbers against are held
+      // back. Its last day is routinely wording alone - no temperatures, no
+      // rain chance - and the weekly block *does* have those, so treating "is
+      // mentioned above" as "is covered above" would throw them away.
+      week: _week(weekly, area.office, {
+        for (final d in days)
+          if (d.tempMax != null) jstDate(d.at),
+      }),
     );
+  }
+
+  /// The 週間予報 block. Shaped unlike the short-term one: a single area per
+  /// series (the whole office, and a single observation point for temperatures)
+  /// rather than one per subdivision, and no wording at all.
+  ///
+  /// [covered] are the JST days the detailed tables already show. JMA repeats
+  /// them here with the fields blanked out, so dropping them keeps the weekly
+  /// table to what it actually adds.
+  List<WeeklyDay> _week(
+    Object? weekly,
+    String office,
+    Set<(int, int)> covered,
+  ) {
+    if (weekly is! Map) return const [];
+    final series = weekly['timeSeries'];
+    if (series is! List) return const [];
+
+    final outlook = _seriesWith(series, 'weatherCodes');
+    final temps = _seriesWith(series, 'tempsMax');
+    final times = _times(outlook);
+    final a = _areaFor(outlook, office);
+    final codes = _strings(a?['weatherCodes']);
+    final pops = _strings(a?['pops']);
+    final grades = _strings(a?['reliabilities']);
+
+    // Temperatures ride their own timeDefines and are keyed by observation
+    // point, so index by day rather than trusting the two series to align.
+    final t = _areaFor(temps, office);
+    final tempTimes = _times(temps);
+    final maxes = _strings(t?['tempsMax']);
+    final mins = _strings(t?['tempsMin']);
+    final byDay = <(int, int), (int?, int?)>{};
+    for (var i = 0; i < tempTimes.length; i++) {
+      byDay[jstDate(tempTimes[i])] = (
+        i < mins.length ? int.tryParse(mins[i]) : null,
+        i < maxes.length ? int.tryParse(maxes[i]) : null,
+      );
+    }
+
+    final out = <WeeklyDay>[];
+    for (var i = 0; i < times.length; i++) {
+      final day = jstDate(times[i]);
+      if (covered.contains(day)) continue;
+      final (min, max) = byDay[day] ?? (null, null);
+      final grade = i < grades.length ? grades[i].trim() : '';
+      out.add(
+        WeeklyDay(
+          at: times[i],
+          code: i < codes.length && codes[i].isNotEmpty ? codes[i] : null,
+          pop: i < pops.length ? int.tryParse(pops[i]) : null,
+          tempMax: max,
+          tempMin: min,
+          reliability: grade.isEmpty ? null : grade,
+        ),
+      );
+    }
+    return out;
   }
 
   /// First timeSeries whose areas carry [field].
@@ -308,6 +419,7 @@ class JmaForecastApi {
     final a = _areaFor(weather, class10);
     if (a == null) return const [];
     final texts = _strings(a['weathers']);
+    final codes = _strings(a['weatherCodes']);
     final winds = _strings(a['winds']);
     final waves = _strings(a['waves']);
 
@@ -334,6 +446,7 @@ class JmaForecastApi {
           return WeatherDay(
             at: times[i],
             weather: _tidy(texts[i]),
+            code: i < codes.length && codes[i].isNotEmpty ? codes[i] : null,
             wind: i < winds.length ? _tidy(winds[i]) : null,
             wave: i < waves.length ? _tidy(waves[i]) : null,
             // A "low" equal to the high is JMA echoing the high into a slot

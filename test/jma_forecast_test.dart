@@ -15,7 +15,11 @@ import 'package:rindo/jma/jma_forecast.dart';
 /// Temperatures reproduce the quirk that drove the pairing logic: a midday
 /// issue echoes the day's high into the already-past 00:00 low slot, so
 /// 25 July arrives as high 35 / "low" 35.
-String _forecastJson({bool withTemps = true, bool withWaves = true}) {
+String _forecastJson({
+  bool withTemps = true,
+  bool withWaves = true,
+  bool thirdDay = false,
+}) {
   Map<String, Object?> area(String code, String name, Map<String, Object?> f) =>
       {
         'area': {'name': name, 'code': code},
@@ -60,17 +64,22 @@ String _forecastJson({bool withTemps = true, bool withWaves = true}) {
           'timeDefines': [
             '2026-07-25T05:00:00+09:00',
             '2026-07-26T00:00:00+09:00',
+            if (thirdDay) '2026-07-27T00:00:00+09:00',
           ],
           'areas': [
             area('120010', '北西部', {
               'weatherCodes': ['212', '212'],
-              'weathers': ['くもり　時々　晴れ', 'くもり　夜　雨'],
+              'weathers': [
+                'くもり　時々　晴れ',
+                'くもり　夜　雨',
+                if (thirdDay) 'くもり',
+              ],
               'winds': ['北西の風　後　南東の風', '西の風'],
               if (withWaves) 'waves': ['０．５メートル', '０．５メートル'],
             }),
             area('120020', '北東部', {
-              'weatherCodes': ['201', '212'],
-              'weathers': ['晴れ　のち　雷雨', 'あめ'],
+              'weatherCodes': ['201', '212', if (thirdDay) '200'],
+              'weathers': ['晴れ　のち　雷雨', 'あめ', if (thirdDay) 'くもり'],
               'winds': ['北の風', '北東の風'],
               if (withWaves) 'waves': ['１．５メートル', '２メートル'],
             }),
@@ -78,7 +87,43 @@ String _forecastJson({bool withTemps = true, bool withWaves = true}) {
         },
       ],
     },
-    {'publishingOffice': '銚子地方気象台', 'timeSeries': []},
+    // 週間予報: a different shape entirely - one area for the whole office,
+    // temperatures at a single observation point, and no wording. JMA repeats
+    // the days the detailed block already covers with the fields blanked.
+    {
+      'publishingOffice': '銚子地方気象台',
+      'timeSeries': [
+        {
+          'timeDefines': [
+            '2026-07-25T00:00:00+09:00',
+            '2026-07-26T00:00:00+09:00',
+            '2026-07-27T00:00:00+09:00',
+            '2026-07-28T00:00:00+09:00',
+          ],
+          'areas': [
+            area('120000', '千葉県', {
+              'weatherCodes': ['200', '200', '201', '101'],
+              'pops': ['', '40', '30', '20'],
+              'reliabilities': ['', '', 'C', 'A'],
+            }),
+          ],
+        },
+        {
+          'timeDefines': [
+            '2026-07-25T00:00:00+09:00',
+            '2026-07-26T00:00:00+09:00',
+            '2026-07-27T00:00:00+09:00',
+            '2026-07-28T00:00:00+09:00',
+          ],
+          'areas': [
+            area('45148', '銚子', {
+              'tempsMin': ['', '24', '23', '25'],
+              'tempsMax': ['', '30', '29', '31'],
+            }),
+          ],
+        },
+      ],
+    },
   ]);
 }
 
@@ -95,6 +140,7 @@ const _overviewJson = '''
 http.Client _fakeJma({
   bool withTemps = true,
   bool withWaves = true,
+  bool thirdDay = false,
   String? headline,
   int status = 200,
 }) => MockClient((req) async {
@@ -105,7 +151,13 @@ http.Client _fakeJma({
     return http.Response.bytes(utf8.encode(jsonEncode(doc)), 200);
   }
   return http.Response.bytes(
-    utf8.encode(_forecastJson(withTemps: withTemps, withWaves: withWaves)),
+    utf8.encode(
+      _forecastJson(
+        withTemps: withTemps,
+        withWaves: withWaves,
+        thirdDay: thirdDay,
+      ),
+    ),
     200,
   );
 });
@@ -180,6 +232,59 @@ void main() {
         client: _fakeJma(headline: '雷と突風及びひょうに関する情報'),
       ).fetch(_inChiba);
       expect(loud.headline, '雷と突風及びひょうに関する情報');
+    });
+
+    test('carries the weather code through for the icon', () async {
+      final r = await JmaForecastApi(client: _fakeJma()).fetch(_inChiba);
+      expect(r.days.first.code, '201');
+      expect(r.days[1].code, '212');
+    });
+
+    test('reads the week ahead, minus the days already detailed', () async {
+      final r = await JmaForecastApi(client: _fakeJma()).fetch(_inChiba);
+
+      // 25 and 26 July are in `days`; repeating them in the weekly table would
+      // say the same thing twice, with worse numbers.
+      expect(r.week.map((d) => jstDate(d.at)), [(7, 27), (7, 28)]);
+      expect(r.week.map((d) => d.code), ['201', '101']);
+      expect(r.week.map((d) => d.pop), [30, 20]);
+      expect(r.week.map((d) => d.tempMax), [29, 31]);
+      expect(r.week.map((d) => d.tempMin), [23, 25]);
+      expect(r.week.map((d) => d.reliability), ['C', 'A']);
+    });
+
+    test('keeps a wording-only day in the week table, where it has numbers',
+        () async {
+      final r = await JmaForecastApi(
+        client: _fakeJma(thirdDay: true),
+      ).fetch(_inChiba);
+
+      // 27 July appears in the detailed block as wording alone - no
+      // temperatures, no rain chance - so the weekly block is the only place
+      // its numbers exist. Dropping it as "already covered" would lose them.
+      expect(r.days.map((d) => jstDate(d.at)), [(7, 25), (7, 26), (7, 27)]);
+      expect(r.days.last.tempMax, isNull);
+      final july27 = r.week.firstWhere((d) => jstDate(d.at) == (7, 27));
+      expect(july27.tempMax, 29);
+      expect(july27.pop, 30);
+      // The two days that *do* have detail stay out of the weekly table.
+      expect(r.week.map((d) => jstDate(d.at)), isNot(contains((7, 25))));
+      expect(r.week.map((d) => jstDate(d.at)), isNot(contains((7, 26))));
+    });
+
+    test('leaves the week empty when JMA sends only the short-term block',
+        () async {
+      final client = MockClient((req) async {
+        if (req.url.path.contains('overview_forecast')) {
+          return http.Response.bytes(utf8.encode(_overviewJson), 200);
+        }
+        // A single-block response: seen when an office is mid-update.
+        final full = jsonDecode(_forecastJson()) as List;
+        return http.Response.bytes(utf8.encode(jsonEncode([full.first])), 200);
+      });
+      final r = await JmaForecastApi(client: client).fetch(_inChiba);
+      expect(r.days, isNotEmpty, reason: 'the detailed forecast still works');
+      expect(r.week, isEmpty);
     });
 
     test('throws for a position JMA does not cover', () async {
