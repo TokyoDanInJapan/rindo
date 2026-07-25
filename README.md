@@ -297,8 +297,9 @@ Fetched at runtime (not redistributed by this repo):
 
 - JMA data: [Public Data License v1.0](https://www.jma.go.jp/jma/en/copyright.html)
   - attribution + "processed" notice required (shown in the map credits).
-  The app redisplays JMA's own published nowcast; it does not synthesise
-  forecasts (regulated under the Weather Service Act).
+  The app redisplays JMA's own published nowcast and area forecasts; it
+  does not synthesise forecasts of its own (regulated under the Weather
+  Service Act).
 - CyclOSM tiles: hosted by OpenStreetMap France, fair-use; OSM data © OpenStreetMap
   contributors (ODbL).
 - Esri World Street Map tiles (English mode): attribution shown in the map
