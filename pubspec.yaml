@@ -1,7 +1,7 @@
 name: rindo
 description: "Touring companion for Japan: JMA rain radar, road closures, and seasonal gates on a rider-centred map."
 publish_to: 'none'
-version: 0.1.1+2
+version: 0.1.2+3
 
 environment:
   sdk: ^3.12.2
