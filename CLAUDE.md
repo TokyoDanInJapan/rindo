@@ -36,3 +36,30 @@ gh pr view <n> --json body --jq '.body | contains("some phrase you just wrote")'
 
 Creating a PR is unaffected: `gh pr create --body-file ...` works normally. It's
 only editing an existing one.
+
+## Releasing: bump `pubspec.yaml` *before* tagging
+
+`.github/workflows/release.yml` refuses a `v*` tag whose version doesn't match
+`pubspec.yaml`:
+
+```
+Tag v0.1.1 != pubspec version 0.1.0 - bump pubspec.yaml
+```
+
+That check is there for a good reason — the APK announces the pubspec version
+whatever the tag says, so a mismatch ships a build that lies about which release
+it is. But it fails *after* the tag exists, which means a wrong tag has to be
+deleted locally and remotely before you can retry.
+
+So the order is:
+
+1. bump `version:` in `pubspec.yaml` (both parts — `0.1.1+2`; the `+N` build
+   number must increase for Android to accept the upgrade)
+2. commit it to `main`
+3. tag `v0.1.1` and push the tag
+
+A `v*` tag triggers two workflows: **Build APK** (debug-signed, artifact only)
+and **Release**, which builds the signed APKs via `tool/release.sh` and attaches
+them to a GitHub Release. Release needs `KEYSTORE_BASE64` and
+`KEYSTORE_PASSWORD` in the repo's `release` *environment* — not repo secrets, or
+they resolve to empty strings.
