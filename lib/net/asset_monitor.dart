@@ -7,13 +7,14 @@ import 'package:http/http.dart';
 import 'response_copy.dart';
 
 /// What a request is fetching, so the debug sheet can group meaningfully.
-enum AssetKind { baseTile, radarTile, radarIndex, closures, other }
+enum AssetKind { baseTile, radarTile, radarIndex, closures, forecast, other }
 
 String assetKindLabel(AssetKind kind) => switch (kind) {
   AssetKind.baseTile => 'Base map tiles',
   AssetKind.radarTile => 'Radar tiles',
   AssetKind.radarIndex => 'Radar index (targetTimes)',
   AssetKind.closures => 'Closures feeds',
+  AssetKind.forecast => 'Weather forecast',
   AssetKind.other => 'Other',
 };
 
@@ -27,6 +28,8 @@ AssetKind classifyAsset(Uri url) {
   }
   if (path.contains('/hrpns/')) return AssetKind.radarTile;
   if (path.contains('targetTimes')) return AssetKind.radarIndex;
+  // Both the structured series and the prose overview live under here.
+  if (path.contains('/forecast/data/')) return AssetKind.forecast;
   if (host == 'www.jartic.or.jp' ||
       host.endsWith('mlit.go.jp') ||
       path.contains('/warning/data/landslide')) {
@@ -104,6 +107,12 @@ class AssetRequest {
         return 'radar ${_zxy(segs)}$hhmm';
       case AssetKind.radarIndex:
         return segs.isEmpty ? url.host : segs.last;
+      case AssetKind.forecast:
+        // .../forecast/{office}.json and .../overview_forecast/{office}.json
+        // share a last segment, so keep the directory that tells them apart.
+        return segs.length < 2
+            ? url.host
+            : '${segs[segs.length - 2]}/${segs.last}';
       case AssetKind.closures:
       case AssetKind.other:
         return '${url.host}/${segs.isEmpty ? '' : segs.last}';

@@ -12,7 +12,9 @@ import 'package:url_launcher/url_launcher.dart';
 import '../closures/closure_repository.dart';
 import '../closures/road_closure.dart';
 import '../jma/jma_api.dart';
+import '../jma/jma_forecast.dart';
 import '../route/gpx_route.dart';
+import '../translate/weather_translation.dart';
 import '../net/asset_monitor.dart';
 import '../net/connectivity_monitor.dart';
 import 'radar_map/closure_sheets.dart';
@@ -26,6 +28,7 @@ import 'radar_map/map_fab_stack.dart';
 import 'radar_map/radar_frame_controller.dart';
 import 'radar_map/radar_legend.dart';
 import 'radar_map/radar_map_view.dart';
+import 'radar_map/weather_sheet.dart';
 import '../net/tile_http_client.dart';
 import '../net/tile_status.dart';
 
@@ -63,6 +66,11 @@ class _RadarMapScreenState extends State<RadarMapScreen>
   late final _apiClient = MonitoredClient(Client(), _assets);
 
   late final _jma = JmaApi(client: _apiClient);
+
+  // Shares the monitored feed client, so a weather fetch shows up in the debug
+  // sheet alongside everything else. No state of its own: the sheet fetches
+  // when it opens and the report dies with it.
+  late final _forecast = JmaForecastApi(client: _apiClient);
 
   // Closures, translation, and the search area (rider/pin/route) all live in
   // the controller; the screen just drives the camera and reads its getters.
@@ -340,6 +348,7 @@ class _RadarMapScreenState extends State<RadarMapScreen>
               _closures.dropPin(latLng);
               setState(() => _follow = false);
             },
+            onShowPlace: _showPlace,
             onShowDetail: _showDetail,
             onOpenUrl: _open,
             onTileError: _onTileError,
@@ -507,6 +516,23 @@ class _RadarMapScreenState extends State<RadarMapScreen>
       setState(() => _follow = false);
       _showDetail(c);
     },
+  );
+
+  /// Tap on the rider dot or the scouting pin: what's available *here*.
+  void _showPlace(LatLng point, {required bool pinned}) => showPlaceSheet(
+    context,
+    pinned: pinned,
+    onWeather: () => showWeatherSheet(
+      context,
+      at: point,
+      load: _forecast.fetch,
+      onOpenSource: _open,
+      // Japanese mode reads JMA verbatim, exactly like the closure list.
+      translate: _closures.english
+          ? (r) => translateReport(r, _closures.translator)
+          : null,
+    ),
+    onClearPin: _closures.clearPin,
   );
 
   void _showDetail(RoadClosure c) => showClosureDetail(

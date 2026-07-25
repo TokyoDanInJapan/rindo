@@ -98,6 +98,7 @@ class ClosuresController extends ChangeNotifier {
   TranslatorStatus get translatorStatus => translation.translatorStatus;
   String? get translatorError => translation.translatorError;
   DateTime? get downloadStartedAt => translation.downloadStartedAt;
+  ClosureTranslator get translator => translation.translator;
   void toggleLanguage() => translation.toggleLanguage();
 
   // ---- mutations
