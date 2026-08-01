@@ -6,30 +6,30 @@ import 'package:latlong2/latlong.dart';
 import '../hazards/municipalities.g.dart';
 import 'forecast_areas.g.dart';
 
-/// Direct client for JMA's 天気予報 (area forecast) endpoints - the ones behind
+/// Direct client for JMA's 天気予報 (area forecast) endpoints, the ones behind
 /// https://www.jma.go.jp/bosai/forecast/. Like the nowcast endpoints in
-/// jma_api.dart these are undocumented and may change without notice; when the
-/// weather sheet breaks, this is the file to touch.
+/// jma_api.dart, these are undocumented and can change without notice. When
+/// the weather sheet breaks, this is the file to touch.
 ///
 ///   forecast:  .../bosai/forecast/data/forecast/{office}.json
-///     -> [shortTerm, weekly], each a bag of "timeSeries" whose entries pair a
+///     -> [shortTerm, weekly], each a bag of 'timeSeries' whose entries pair a
 ///        timeDefines list with per-area arrays of the same length
 ///   overview:  .../bosai/forecast/data/overview_forecast/{office}.json
 ///     -> { publishingOffice, reportDatetime, targetArea, headlineText, text }
 ///
-/// Only the short-term block is read. The weekly block is a different shape
-/// (per-office rather than per-subdivision, with confidence grades) and says
-/// little a rider heading out now can act on.
+/// Both blocks are read. The weekly block has a different shape from the
+/// short-term one: a single area per series rather than one per subdivision,
+/// with confidence grades and no wording.
 ///
 /// Everything is keyed by JMA area code, never by coordinates, so a position
-/// has to be resolved first - see [forecastAreaFor].
+/// must be resolved first. See [forecastAreaFor].
 const jmaForecastBase = 'https://www.jma.go.jp/bosai/forecast/data';
 
 /// The JMA area a position falls in, plus the municipality that resolved it.
 ///
-/// Reports are only ever *for* an area, so the sheet names the municipality it
-/// matched: "南部 (館山市 near you)" is honest in a way that a bare subdivision
-/// name isn't, especially when the nearest town is some way off.
+/// A report is only ever *for* an area, so the sheet names the municipality it
+/// matched. '南部 (館山市 near you)' is honest in a way that a bare subdivision
+/// name is not, especially when the nearest town is some way off.
 class ForecastArea {
   const ForecastArea({
     required this.municipality,
@@ -50,11 +50,12 @@ class ForecastArea {
   /// JMA's own English for the subdivision (North-eastern Region).
   final String class10En;
 
-  /// JMA class10 subdivision code - the granularity weather text is written
-  /// at (120010 = 千葉県北西部).
+  /// JMA class10 subdivision code. This is the granularity the weather text is
+  /// written at (120010 = 千葉県北西部).
   final String class10;
 
-  /// JMA office code - the file both endpoints are keyed by (120000).
+  /// JMA office code, which names the file both endpoints are keyed by
+  /// (120000).
   final String office;
 
   /// How far the matched municipality's office is from the query point.
@@ -63,14 +64,16 @@ class ForecastArea {
 
 /// Nearest municipality with a JMA forecast area, or null outside Japan.
 ///
-/// A straight nearest-neighbour scan over the baked table (~1700 rows, one
-/// pass, no allocation per row). Point-in-polygon against the real subdivision
-/// boundaries would be more correct near a border, but those boundaries aren't
-/// published in a form worth shipping, and a forecast subdivision is coarse
-/// enough that the nearest town is the right answer nearly everywhere.
+/// A straight nearest-neighbour scan over the baked table: about 1700 rows,
+/// one pass, no allocation per row. Point-in-polygon against the real
+/// subdivision boundaries would be more correct near a border, but those
+/// boundaries are not published in a form worth shipping. A forecast
+/// subdivision is coarse enough that the nearest town is the right answer
+/// nearly everywhere.
 ///
-/// [maxKm] rejects positions that resolve to something absurdly far away - a
-/// camera parked over the Pacific shouldn't confidently report Chiba's weather.
+/// [maxKm] rejects a position that resolves to something absurdly far away. A
+/// camera parked over the Pacific should not confidently report Chiba's
+/// weather.
 ForecastArea? forecastAreaFor(LatLng at, {double maxKm = 150}) {
   const dist = Distance();
   String? bestCode;
@@ -98,9 +101,9 @@ ForecastArea? forecastAreaFor(LatLng at, {double maxKm = 150}) {
 }
 
 /// One forecast day: JMA's own wording, plus whatever else it published for
-/// that day. Every field but [at] and [weather] can be absent - inland
-/// subdivisions carry no wave height, and temperatures come from a separate
-/// series keyed by observation point, so they don't always line up.
+/// that day. Every field except [at] and [weather] can be absent. Inland
+/// subdivisions carry no wave height. Temperatures come from a separate series
+/// keyed by observation point, so they do not always line up.
 class WeatherDay {
   const WeatherDay({
     required this.at,
@@ -125,7 +128,7 @@ class WeatherDay {
   final int? tempMin;
 }
 
-/// One day of the 週間予報. Numbers and a code, no prose: JMA doesn't write
+/// One day of the 週間予報: numbers and a code, no prose. JMA does not write
 /// wording this far out, which is why the weekly view is a table on its page
 /// and a table here.
 class WeeklyDay {
@@ -146,12 +149,12 @@ class WeeklyDay {
   final int? tempMax;
   final int? tempMin;
 
-  /// JMA's confidence grade, A (highest) to C. Worth showing: it's the
-  /// difference between planning on a forecast and hoping.
+  /// JMA's confidence grade, A (highest) to C. It is worth showing, because it
+  /// is the difference between planning on a forecast and hoping.
   final String? reliability;
 }
 
-/// Chance of rain in one 6-hour block - the number a rider actually plans on.
+/// Chance of rain in one 6-hour block: the number a rider actually plans on.
 class RainChance {
   const RainChance({required this.at, required this.percent});
   final DateTime at;
@@ -174,15 +177,15 @@ class WeatherReport {
   final ForecastArea area;
 
   /// JMA's name for the subdivision (北西部), from the response rather than a
-  /// baked table, so a renamed area can't go stale here.
+  /// baked table, so a renamed area cannot go stale here.
   final String areaName;
 
   /// Issuing office as JMA names it (銚子地方気象台).
   final String office;
   final DateTime reportedAt;
 
-  /// JMA's warning headline. Usually absent; when present it's the thing to
-  /// read first, so the sheet leads with it.
+  /// JMA's warning headline. It is usually absent. When it is present, it is
+  /// the thing to read first, so the sheet leads with it.
   final String? headline;
 
   /// The prose forecast for the whole prefecture.
@@ -192,18 +195,18 @@ class WeatherReport {
   final List<RainChance> rain;
 
   /// The week beyond [days]. Days already covered in detail are left out, so
-  /// the two tables don't say the same thing twice.
+  /// the two tables do not say the same thing twice.
   final List<WeeklyDay> week;
 
-  /// JMA's own page for this area, for the "read it on JMA" link.
+  /// JMA's own page for this area, for the 'read it on JMA' link.
   Uri get sourceUrl => Uri.parse(
     'https://www.jma.go.jp/bosai/forecast/'
     '#area_type=offices&area_code=${area.office}',
   );
 }
 
-/// "HH:MM" in JST for a UTC instant. Same convention as [JmaFrame.jstLabel]:
-/// the app is Japan-only, so times are shown in Japan's clock whatever the
+/// 'HH:MM' in JST for a UTC instant. Same convention as [JmaFrame.jstLabel].
+/// The app covers Japan only, so it shows times on Japan's clock whatever the
 /// phone is set to.
 String jstHhmm(DateTime utc) {
   final jst = utc.toUtc().add(const Duration(hours: 9));
@@ -217,7 +220,7 @@ String jstHhmm(DateTime utc) {
   return (jst.month, jst.day);
 }
 
-/// JST hour for a UTC instant - which 6-hour block a rain chance belongs to.
+/// JST hour for a UTC instant: which 6-hour block a rain chance belongs to.
 int jstHour(DateTime utc) => utc.toUtc().add(const Duration(hours: 9)).hour;
 
 class JmaForecastApi {
@@ -280,7 +283,7 @@ class JmaForecastApi {
     if (series is! List) throw JmaForecastException('forecast: no timeSeries');
 
     // The series are identified by which fields their areas carry, not by
-    // position: JMA has reordered them before, and an office with no coastline
+    // position. JMA has reordered them before, and an office with no coastline
     // simply omits some.
     final weather = _seriesWith(series, 'weathers');
     final pops = _seriesWith(series, 'pops');
@@ -308,10 +311,11 @@ class JmaForecastApi {
       overview: _tidy(overview['text'] as String? ?? ''),
       days: days,
       rain: _rain(pops, area.class10),
-      // Only days the detailed block actually put numbers against are held
-      // back. Its last day is routinely wording alone - no temperatures, no
-      // rain chance - and the weekly block *does* have those, so treating "is
-      // mentioned above" as "is covered above" would throw them away.
+      // Only days that the detailed block actually put numbers against are
+      // held back. Its last day is routinely wording alone, with no
+      // temperatures and no rain chance, and the weekly block *does* have
+      // those. Treating 'is mentioned above' as 'is covered above' would throw
+      // them away.
       week: _week(weekly, area.office, {
         for (final d in days)
           if (d.tempMax != null) jstDate(d.at),
@@ -319,13 +323,14 @@ class JmaForecastApi {
     );
   }
 
-  /// The 週間予報 block. Shaped unlike the short-term one: a single area per
-  /// series (the whole office, and a single observation point for temperatures)
-  /// rather than one per subdivision, and no wording at all.
+  /// The 週間予報 block. It is shaped unlike the short-term one: a single area
+  /// per series rather than one per subdivision, and no wording at all. That
+  /// single area is the whole office, with one observation point for the
+  /// temperatures.
   ///
-  /// [covered] are the JST days the detailed tables already show. JMA repeats
-  /// them here with the fields blanked out, so dropping them keeps the weekly
-  /// table to what it actually adds.
+  /// [covered] are the JST days that the detailed tables already show. JMA
+  /// repeats them here with the fields blanked out, so dropping them keeps the
+  /// weekly table to what it actually adds.
   List<WeeklyDay> _week(
     Object? weekly,
     String office,
@@ -391,8 +396,8 @@ class JmaForecastApi {
     return null;
   }
 
-  /// The entry for [code] in a series, or the first entry as a fallback -
-  /// temperature series are keyed by observation point, which never matches a
+  /// The entry for [code] in a series, or the first entry as a fallback. A
+  /// temperature series is keyed by observation point, which never matches a
   /// class10 code, and one prefectural number beats showing none.
   Map<String, dynamic>? _areaFor(Map<String, dynamic>? series, String code) {
     final areas = series?['areas'];
@@ -424,9 +429,9 @@ class JmaForecastApi {
     final waves = _strings(a['waves']);
 
     // Temperatures come as a flat list against their own timeDefines, so pair
-    // them by clock time rather than by index: the 00:00 slot is the day's low
-    // and the 09:00 slot its high. Reading them positionally breaks whenever
-    // JMA drops the already-past morning low from a midday issue.
+    // them by clock time rather than by index. The 00:00 slot is the day's low
+    // and the 09:00 slot is its high. Reading them positionally breaks
+    // whenever JMA drops the already-past morning low from a midday issue.
     final byDay = <(int, int), (int?, int?)>{};
     final tempTimes = _times(temps);
     final tempVals = _strings(_areaFor(temps, class10)?['temps']);
@@ -449,8 +454,8 @@ class JmaForecastApi {
             code: i < codes.length && codes[i].isNotEmpty ? codes[i] : null,
             wind: i < winds.length ? _tidy(winds[i]) : null,
             wave: i < waves.length ? _tidy(waves[i]) : null,
-            // A "low" equal to the high is JMA echoing the high into a slot
-            // that has already passed; showing it as a low would be a lie.
+            // A 'low' equal to the high is JMA echoing the high into a slot
+            // that has already passed. Showing it as a low would be a lie.
             tempMin: min == max ? null : min,
             tempMax: max,
           );
@@ -474,13 +479,14 @@ class JmaForecastApi {
   ];
 
   /// JMA pads its text with ideographic spaces as word separators
-  /// (`くもり　時々　晴れ`); its own site renders them closed up, and so should
-  /// we. Blank lines in the prose are kept - they're paragraph breaks.
+  /// (`くもり　時々　晴れ`). Its own site renders them closed up, and so should
+  /// this app. Blank lines in the prose are kept, because they are paragraph
+  /// breaks.
   String _tidy(String s) => s.replaceAll('　', '').trim();
 }
 
-/// JMA's forecast endpoints returned something unusable, or the position isn't
-/// one they cover.
+/// JMA's forecast endpoints returned something unusable, or the position is
+/// not one they cover.
 class JmaForecastException implements Exception {
   JmaForecastException(this.message);
   final String message;

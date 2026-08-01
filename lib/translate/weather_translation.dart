@@ -3,16 +3,16 @@ import 'closure_translator.dart';
 
 /// English display copy of a JMA weather report.
 ///
-/// Two sources, deliberately: place names come from JMA's own English (baked
-/// into forecast_areas.g.dart), and only the free prose goes through ML Kit.
-/// Machine translation is at its worst on place names - 北東部 and 千葉市 come
-/// back as things a rider has to decode - while JMA already publishes "North-
-/// eastern Region" and "Chiba City" for exactly these codes.
+/// Two sources, deliberately. Place names come from JMA's own English, baked
+/// into forecast_areas.g.dart, and only the free prose goes through ML Kit.
+/// Machine translation is at its worst on place names, and 北東部 and 千葉市
+/// come back as things a rider has to decode. JMA already publishes
+/// 'North-eastern Region' and 'Chiba City' for exactly these codes.
 ///
-/// Never throws and never blocks on a missing model: [ClosureTranslator]
-/// degrades each string to its Japanese original, so a failed or undownloaded
-/// model yields the report unchanged rather than an error. Same contract the
-/// closure list has had.
+/// This never throws and never blocks on a missing model. [ClosureTranslator]
+/// degrades each string to its Japanese original, so a model that failed or
+/// was never downloaded yields the report unchanged rather than an error. This
+/// is the same contract the closure list has had.
 Future<WeatherReport> translateReport(
   WeatherReport r,
   ClosureTranslator translator,
@@ -22,9 +22,9 @@ Future<WeatherReport> translateReport(
   Future<String?> maybe(String? ja) async =>
       ja == null ? null : await translator.translateText(ja);
 
-  // The day rows are independent, so translate them concurrently - a report
-  // is ~10 short strings and doing them in series is a visible pause on the
-  // first (uncached) open.
+  // The day rows are independent, so translate them concurrently. A report is
+  // about 10 short strings, and doing them in series is a visible pause on the
+  // first, uncached open.
   final days = await Future.wait(
     r.days.map(
       (d) async => WeatherDay(
@@ -59,8 +59,8 @@ Future<WeatherReport> translateReport(
     overview: overview,
     days: days,
     rain: r.rain,
-    // Codes and numbers - nothing to translate, and the table's labels are
-    // already English.
+    // Codes and numbers, so there is nothing to translate, and the table's
+    // labels are already English.
     week: r.week,
   );
 }

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-/// The bottom-right control stack. Dumb: it renders current state and calls
-/// back - all the logic lives in the screen.
+/// The bottom-right control stack. It is deliberately dumb: it renders the
+/// current state and calls back. All the logic lives in the screen.
 class MapFabStack extends StatelessWidget {
   final bool routeLoaded;
   final bool english;
@@ -39,7 +39,7 @@ class MapFabStack extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Lifted clear of the corner so the (mandatory) attribution control
+    // Lifted clear of the corner, so that the mandatory attribution control
     // stays visible beneath the stack.
     return Padding(
       padding: const EdgeInsets.only(bottom: 48),
@@ -67,7 +67,7 @@ class MapFabStack extends StatelessWidget {
           FloatingActionButton.small(
             heroTag: 'language',
             tooltip: english
-                ? 'Show original Japanese'
+                ? 'Show the original Japanese'
                 : 'Translate to English',
             onPressed: onToggleLanguage,
             child: Text(
@@ -98,7 +98,7 @@ class MapFabStack extends StatelessWidget {
           const SizedBox(height: 8),
           FloatingActionButton.small(
             heroTag: 'refresh',
-            tooltip: 'Refresh radar + closures',
+            tooltip: 'Refresh the radar and closures',
             onPressed: onRefresh,
             child: closuresLoading
                 ? const SizedBox(
@@ -112,10 +112,10 @@ class MapFabStack extends StatelessWidget {
           FloatingActionButton(
             heroTag: 'follow',
             tooltip: pinned
-                ? 'Drop pin, return to rider'
+                ? 'Clear the pin and return to the rider'
                 : following
-                ? 'Following rider'
-                : 'Re-centre on rider',
+                ? 'Following the rider'
+                : 'Re-centre on the rider',
             onPressed: onRecenter,
             child: Icon(
               following ? Icons.my_location : Icons.location_searching,

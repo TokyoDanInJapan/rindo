@@ -7,21 +7,23 @@ import 'geojson.dart';
 import 'prefectures.dart';
 import 'road_closure.dart';
 
-/// Live full-closure (通行止) data from JARTIC's 道路交通情報Now!! map - the
+/// Live full-closure (通行止) data from JARTIC's 道路交通情報Now!! map: the
 /// undocumented GeoJSON endpoints behind https://www.jartic.or.jp/map/.
-/// The only national source that covers prefectural roads, which are the
-/// roads that actually matter on a bike. Not an official API; may change
-/// without notice. NB: JARTIC's terms limit the site to private use - fine
-/// for a personal tool, ask JARTIC before distributing publicly.
+/// This is the only national source that covers prefectural roads, which are
+/// the roads that actually matter on a bike. It is not an official API and can
+/// change without notice. Note that JARTIC's terms limit the site to private
+/// use. That is fine for a personal tool, but ask JARTIC before you distribute
+/// it publicly.
 ///
 ///   generation: GET /d/traffic_info/r1/target.json -> {"target":"YYYYMMDDHHmm"}
 ///   closures:   GET /d/traffic_info/r1/{target}/d/301/{tile}.json
 ///     tile = R{prefCode} for general roads (Hokkaido splits into R01_1..R01_5)
 ///
-/// Feature properties: rd = regulation text, cs = regulation code ("01" =
-/// full closure), c = cause, r = road name, i = section/place, d = direction,
-/// p = representative points [[lon,lat]]. Geometry is (Multi)LineString in
-/// JGD2000 lon/lat - treated as WGS84 (the difference is centimetres).
+/// Feature properties: rd = regulation text, cs = regulation code ('01' =
+/// full closure), c = cause, r = road name, i = section or place, d =
+/// direction, p = representative points [[lon,lat]]. The geometry is a
+/// (Multi)LineString in JGD2000 lon/lat, treated here as WGS84, because the
+/// difference is centimetres.
 class JarticSource {
   static const _base = 'https://www.jartic.or.jp/d/traffic_info/r1';
   final http.Client _client;
@@ -35,8 +37,8 @@ class JarticSource {
     );
   }
 
-  /// Closures in [prefs] whose point passes [keep] - the shared engine for
-  /// circle (around a point) and corridor (along a route) queries.
+  /// Closures in [prefs] whose point passes [keep]. This is the shared engine
+  /// for circle queries, around a point, and corridor queries, along a route.
   Future<List<RoadClosure>> fetchWhere(
     List<Prefecture> prefs,
     bool Function(LatLng) keep,
@@ -74,16 +76,16 @@ class JarticSource {
     return target;
   }
 
-  /// One prefecture tile. A missing/failed tile degrades to "no data from
-  /// this tile" rather than failing the whole search.
+  /// One prefecture tile. A tile that is missing or that fails degrades to 'no
+  /// data from this tile' rather than failing the whole search.
   Future<List<RoadClosure>> _fetchTile(String target, String tile) async {
     try {
       final r = await _client
           .get(Uri.parse('$_base/$target/d/301/$tile.json'))
           .timeout(const Duration(seconds: 15));
       if (r.statusCode != 200) return const [];
-      // Decode bytes as UTF-8 explicitly: package:http falls back to Latin-1
-      // when the server omits a charset, which mangles Japanese text.
+      // Decode the bytes as UTF-8 explicitly. package:http falls back to
+      // Latin-1 when the server omits a charset, which mangles Japanese text.
       final doc = jsonDecode(utf8.decode(r.bodyBytes));
       final features = (doc as Map)['features'];
       if (features is! List) return const [];
@@ -108,7 +110,7 @@ class JarticSource {
     final props = f['properties'];
     if (props is! Map) return null;
 
-    // Only impassable regulations: cs "01" is JARTIC's full-closure code.
+    // Only impassable regulations: cs '01' is JARTIC's full-closure code.
     final rd = props['rd'] as String? ?? '';
     if (props['cs'] != '01' && !rd.contains('通行止')) return null;
 
@@ -142,8 +144,8 @@ class JarticSource {
     return d == null || d.isEmpty ? i : '$i（$d）';
   }
 
-  /// `p` holds representative point(s) as GeoJSON positions; fall back to
-  /// the start of the regulated segment when it's absent.
+  /// `p` holds one or more representative points as GeoJSON positions. When
+  /// `p` is absent, fall back to the start of the regulated segment.
   LatLng? _representativePoint(dynamic p, List<List<LatLng>> lines) {
     final pts = latLngLine(p);
     if (pts.isNotEmpty) return pts.first;

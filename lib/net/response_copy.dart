@@ -1,8 +1,9 @@
 import 'package:http/http.dart';
 
-/// For client wrappers that guard or tap a response body (the tile client's
-/// stall deadline, the asset monitor's byte counter): same response, new
-/// body stream, every other field carried over verbatim.
+/// For client wrappers that guard or tap a response body, such as the tile
+/// client's stall deadline and the asset monitor's byte counter. It gives the
+/// same response with a new body stream, and carries every other field over
+/// unchanged.
 extension StreamedResponseCopy on StreamedResponse {
   StreamedResponse copyWithStream(Stream<List<int>> stream) => StreamedResponse(
     stream,

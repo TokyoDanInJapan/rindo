@@ -6,16 +6,16 @@ import 'screen_margin.dart';
 
 /// A compass button that appears while the map is turned away from north.
 ///
-/// The needle tracks the map's north as the map rotates - it gets the same
-/// transform flutter_map applies to the map itself - and tapping it snaps the
-/// map back to north-up. When the map is already north-aligned there is
-/// nothing to correct, so the button hides itself (the Google/Apple Maps
-/// pattern). Rotate the map with a two-finger twist to bring it out.
+/// The needle tracks the map's north as the map rotates, because it gets the
+/// same transform that flutter_map applies to the map itself. Tapping it snaps
+/// the map back to north-up. When the map is already north-aligned there is
+/// nothing to correct, so the button hides itself, as it does in Google Maps
+/// and Apple Maps. Rotate the map with a two-finger twist to bring it out.
 class MapCompass extends StatelessWidget {
-  /// Map rotation in degrees, from flutter_map's camera; 0 == north-up.
+  /// Map rotation in degrees, from flutter_map's camera, where 0 is north-up.
   final double rotationDeg;
 
-  /// Tapped: the screen resets the map to north.
+  /// Tapped, so the screen resets the map to north.
   final VoidCallback onFaceNorth;
 
   const MapCompass({
@@ -24,7 +24,7 @@ class MapCompass extends StatelessWidget {
     required this.onFaceNorth,
   });
 
-  /// How far off north [deg] is, folded into 0..180 so 359° reads as 1° off.
+  /// How far off north [deg] is, folded into 0..180, so 359° reads as 1° off.
   static double offNorth(double deg) {
     final norm = (deg % 360 + 360) % 360;
     return norm > 180 ? 360 - norm : norm;
@@ -32,13 +32,14 @@ class MapCompass extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Within a degree of north there's nothing to reset, so show nothing.
+    // Within a degree of north there is nothing to reset, so show nothing.
     if (offNorth(rotationDeg) < 1) return const SizedBox.shrink();
 
     final scheme = Theme.of(context).colorScheme;
     return Padding(
-      // top 8 is spacing below the banners; the right edge takes the shared
-      // screen margin so the compass lines up with the FAB column below it.
+      // The top 8 is spacing below the banners. The right edge takes the
+      // shared screen margin, so that the compass lines up with the button
+      // column below it.
       padding: const EdgeInsets.only(top: 8, right: screenMargin),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.end,
@@ -49,8 +50,8 @@ class MapCompass extends StatelessWidget {
             backgroundColor: scheme.surface,
             foregroundColor: scheme.onSurface,
             onPressed: onFaceNorth,
-            // The same transform flutter_map applies to the map itself
-            // (Transform.rotate by the camera's rotationRad), so the red N tip
+            // The same transform flutter_map applies to the map itself, a
+            // Transform.rotate by the camera's rotationRad, so the red N tip
             // always points along the map's north on screen.
             child: Transform.rotate(
               angle: rotationDeg * math.pi / 180,

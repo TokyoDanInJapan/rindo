@@ -4,19 +4,19 @@ import 'package:meta/meta.dart';
 import 'road_closure.dart';
 import 'seasonal_gate_lines.g.dart';
 
-/// A curated seasonal (winter) closure gate. The live feeds only report what
-/// is closed *right now*; this dataset answers the planning question - "will
-/// that pass be open in October?" - for the annual gates the prefectures
-/// publish. Dates are nominal: the real gate dates shift with snowfall each
-/// season, so the live feeds stay the ground truth for "closed today".
+/// A curated seasonal, winter closure gate. The live feeds report only what is
+/// closed *right now*. This dataset answers the planning question, 'will that
+/// pass be open in October?', for the annual gates that the prefectures
+/// publish. The dates are nominal. The real gate dates shift with the snowfall
+/// each season, so the live feeds stay the ground truth for 'closed today'.
 class SeasonalGate {
   final String id;
-  final String roadName; // e.g. '国道292号（志賀草津道路）'
-  final String section; // closed section / gate names
+  final String roadName; // such as '国道292号（志賀草津道路）'
+  final String section; // closed section, or the gate names
   final double lat, lon; // the pass or gate, not exact gate posts
   final int closesMonth, closesDay; // nominal annual gate closing
   final int opensMonth, opensDay; // nominal annual gate opening
-  final String? note; // rider-relevant extra, e.g. マイカー規制
+  final String? note; // rider-relevant extra, such as マイカー規制
   final String sourceUrl; // authoritative seasonal info page
 
   const SeasonalGate({
@@ -34,9 +34,9 @@ class SeasonalGate {
   });
 }
 
-/// Curated from the prefectures' 2025–26 winter-closure notices (verified
-/// 2026-07). Update once a year when the annual notices appear; coordinates
-/// mark the pass itself.
+/// Curated from the prefectures' 2025–26 winter-closure notices, verified in
+/// July 2026. Update it once a year when the annual notices appear. The
+/// coordinates mark the pass itself.
 const seasonalGates = <SeasonalGate>[
   SeasonalGate(
     id: 'r292-shibu',
@@ -129,9 +129,10 @@ class SeasonalGateSource {
     ];
   }
 
-  /// The gate's current-or-next closure window relative to [now]: the window
-  /// containing [now], else the next to start. Windows normally span new
-  /// year (close in Nov, open in Apr), so try starting years around [now].
+  /// The gate's current or next closure window relative to [now]: the window
+  /// that contains [now], or else the next one to start. A window normally
+  /// spans the new year, closing in November and opening in April, so try the
+  /// starting years around [now].
   @visibleForTesting
   static (DateTime, DateTime) windowAt(SeasonalGate g, DateTime now) {
     for (var y = now.year - 1; y <= now.year + 1; y++) {
@@ -162,8 +163,8 @@ class SeasonalGateSource {
       validFrom: from,
       validUntil: until,
       isSeasonal: true,
-      // Road geometry baked from OSM by tool/fetch_gate_lines.dart, so the
-      // whole closed section highlights, not just a pin at the pass.
+      // Road geometry baked from OSM by tool/fetch_gate_lines.dart, so that
+      // the whole closed section highlights, not just a pin at the pass.
       lines: seasonalGateLines[g.id] ?? const [],
     );
   }

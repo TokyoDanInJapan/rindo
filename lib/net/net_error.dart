@@ -1,10 +1,10 @@
-/// One place that answers "does this error smell like lost connectivity?".
+/// One place that answers 'does this error smell like lost connectivity?'.
 ///
-/// Errors reach the UI as strings (tile error callbacks and feed fetches
-/// stringify them), so the classification is textual. Used by the offline
-/// heuristic (ConnectivityMonitor) and the rider-facing banner copy
-/// (MapBanners); before this existed each kept its own marker list and they
-/// had already drifted apart.
+/// Errors reach the UI as strings, because the tile error callbacks and the
+/// feed fetches stringify them, so the classification works on text. It is
+/// used by the offline heuristic, ConnectivityMonitor, and by the rider-facing
+/// banner copy, MapBanners. Before this existed each kept its own marker list,
+/// and the two had already drifted apart.
 const _connectivityMarkers = [
   'SocketException',
   'ClientException',

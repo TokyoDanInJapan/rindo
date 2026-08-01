@@ -1,17 +1,18 @@
-/// GENERATED from dataofjapan/land japan.geojson - prefecture bounding
-/// boxes (WGS84) plus JARTIC tile codes and MLIT bureau codes.
-/// (Hand-written part: [prefecturesNear].)
+/// GENERATED from dataofjapan/land japan.geojson: prefecture bounding boxes
+/// (WGS84) plus JARTIC tile codes and MLIT bureau codes.
+/// (The hand-written part is [prefecturesNear].)
 library;
 
 import 'dart:math' as math;
 
 import 'package:latlong2/latlong.dart';
 
-// prefecturesAlong lives here (route corridor) next to prefecturesNear.
+// prefecturesAlong, for the route corridor, lives here next to
+// prefecturesNear.
 
-/// Prefectures whose bounding box intersects the search circle. The bbox is
-/// expanded by the radius, so a rider near a border pulls the neighbouring
-/// prefecture too; a false positive just costs one small tile fetch.
+/// Prefectures whose bounding box intersects the search circle. The bounding
+/// box is expanded by the radius, so a rider near a border pulls the
+/// neighbouring prefecture too. A false positive costs one small tile fetch.
 List<Prefecture> prefecturesNear(LatLng center, double radiusKm) {
   final dLat = radiusKm / 111.0;
   final dLon = radiusKm / (111.32 * math.cos(center.latitude * math.pi / 180));
@@ -25,8 +26,8 @@ List<Prefecture> prefecturesNear(LatLng center, double radiusKm) {
   ];
 }
 
-/// Union of [prefecturesNear] over a (thinned) route's points - the tile
-/// set a route corridor needs.
+/// Union of [prefecturesNear] over the points of a thinned route: the tile set
+/// that a route corridor needs.
 List<Prefecture> prefecturesAlong(List<LatLng> route, double radiusKm) {
   final byCode = <String, Prefecture>{};
   for (final p in route) {
@@ -37,8 +38,8 @@ List<Prefecture> prefecturesAlong(List<LatLng> route, double radiusKm) {
   return byCode.values.toList();
 }
 
-/// One prefecture: JIS code, bounding box, and the MLIT bureau(s) whose
-/// feeds cover it. Rows live in the generated [prefectures] table.
+/// One prefecture: JIS code, bounding box, and the MLIT bureaux whose feeds
+/// cover it. The rows live in the generated [prefectures] table.
 class Prefecture {
   final String code; // 2-digit JIS code, also JARTIC R-tile suffix
   final String name;

@@ -4,9 +4,10 @@ import 'package:latlong2/latlong.dart';
 import '../../closures/road_closure.dart';
 import 'closure_presentation.dart';
 
-/// Bottom sheets for the closure list and a single closure's details. Both
-/// pad their bottom by the system view padding so the last row / source
-/// button stay clear of the navigation overlay (gesture bar / buttons).
+/// Bottom sheets for the closure list and for a single closure's details. Both
+/// sheets pad their bottom by the system view padding. This keeps the last row
+/// and the source button clear of the navigation overlay, whether that overlay
+/// is the gesture bar or the buttons.
 
 void showClosureList(
   BuildContext context, {
@@ -41,8 +42,8 @@ void showClosureList(
             loading
                 ? 'Checking for closures…'
                 : center == null && !routeMode
-                ? 'Waiting for a GPS fix before searching for closures '
-                      '(or long-press the map to drop a pin).'
+                ? 'Waiting for a GPS fix before the search for closures '
+                      'starts. Or long-press the map to drop a pin.'
                 : 'No reported closures within ${radiusKm.round()} km'
                       '$scope.\n\n'
                       'Source: $attribution',
@@ -58,7 +59,7 @@ void showClosureList(
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Text(
-              'Closures & alerts within ${radiusKm.round()} km'
+              'Closures and alerts within ${radiusKm.round()} km'
               '$scope (${closures.length})',
               style: Theme.of(ctx).textTheme.titleMedium,
             ),
@@ -66,7 +67,7 @@ void showClosureList(
           for (final c in closures)
             ListTile(
               leading: Icon(closureIcon(c), color: closureColor(c, now)),
-              title: Text('${c.roadName} - ${c.restriction}'),
+              title: Text('${c.roadName} – ${c.restriction}'),
               subtitle: Text(
                 [
                   if (center != null)
@@ -112,7 +113,7 @@ void showClosureDetail(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '${c.roadName} - ${c.restriction}',
+            '${c.roadName} – ${c.restriction}',
             style: Theme.of(ctx).textTheme.titleLarge,
           ),
           const SizedBox(height: 8),
@@ -125,11 +126,11 @@ void showClosureDetail(
               child: Text(
                 c.statusAt(now) == ClosureStatus.scheduled
                     ? 'Seasonal gate: closes ${ymd(c.validFrom!)}, reopens '
-                          '~${ymd(c.validUntil!)}. Nominal dates - confirm '
-                          'locally before riding.'
-                    : 'Winter closure in effect: reopens '
-                          '~${ymd(c.validUntil!)}. Nominal date - confirm '
-                          'locally.',
+                          'about ${ymd(c.validUntil!)}. These dates are '
+                          'nominal. Confirm locally before you ride.'
+                    : 'Winter closure in effect: reopens about '
+                          '${ymd(c.validUntil!)}. This date is nominal. '
+                          'Confirm locally.',
                 style: TextStyle(color: Colors.indigo.shade400),
               ),
             ),

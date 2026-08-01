@@ -13,15 +13,17 @@ import 'municipalities.g.dart';
 ///     -> [{ reportDatetime, targetArea, areaTypes: [... {areas:
 ///        [{areaCode: "1042600", warningCode: "0|1|3"}]}] }]
 ///
-/// warningCode semantics come from JMA's own site code (warning_table.js):
-/// ONLY '3' is an alert in effect - '1' is a historical/cleared state that
-/// lingers in the file with an old reportDatetime, so treating non-zero as
-/// active would paint most of Japan amber on a dry day.
+/// The warningCode semantics come from JMA's own site code
+/// (warning_table.js). ONLY '3' is an alert in effect. A '1' is a historical,
+/// cleared state that lingers in the file with an old reportDatetime, so
+/// treating any non-zero value as active would paint most of Japan amber on a
+/// dry day.
 ///
-/// Alerts are emitted as [RoadClosure]s pinned at the municipality office
-/// (baked table, tool/prep_municipalities.dart) so they flow through the
-/// same markers/list/translation as everything else. They lead closures:
-/// the warning usually comes hours before roads actually shut.
+/// Alerts are emitted as [RoadClosure]s pinned at the municipality office,
+/// from the baked table in tool/prep_municipalities.dart, so they flow through
+/// the same markers, list and translation as everything else. They lead the
+/// closures, because the warning usually comes hours before roads actually
+/// shut.
 class LandslideSource {
   static const _url =
       'https://www.jma.go.jp/bosai/warning/data/landslide/map.json';
@@ -45,7 +47,7 @@ class LandslideSource {
       final reported = office['reportDatetime'] as String? ?? '';
       final areaTypes = office['areaTypes'];
       if (areaTypes is! List || areaTypes.isEmpty) continue;
-      // The last areaType level is class20s (municipalities).
+      // The last areaType level is the class20s, the municipalities.
       final areas = (areaTypes.last as Map)['areas'];
       if (areas is! List) continue;
       for (final a in areas) {
@@ -53,7 +55,7 @@ class LandslideSource {
         final class20 = '${a['areaCode']}';
         final code5 = class20.length >= 5 ? class20.substring(0, 5) : class20;
         final m = municipalities[code5];
-        // Skip codes the baked table doesn't know (post-merger drift).
+        // Skip codes the baked table does not know, from post-merger drift.
         if (m == null || !seen.add(code5)) continue;
         final (name, lat, lon) = m;
         final point = LatLng(lat, lon);

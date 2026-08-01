@@ -4,7 +4,7 @@ import 'screens/radar_map_screen.dart';
 
 void main() => runApp(const RindoApp());
 
-/// Root widget: Material theme + the single map screen.
+/// Root widget: the Material theme plus the single map screen.
 class RindoApp extends StatelessWidget {
   const RindoApp({super.key});
 
