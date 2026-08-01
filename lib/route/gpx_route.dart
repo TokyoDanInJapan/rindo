@@ -1,15 +1,15 @@
 import 'package:latlong2/latlong.dart';
 import 'package:xml/xml.dart';
 
-/// GPX parsing + route geometry for "closures along my planned ride".
+/// GPX parsing and route geometry for 'closures along my planned ride'.
 ///
 /// GPX is simple: `<trkpt lat=".." lon="..">` inside track segments, or
 /// `<rtept>` for planned routes, or bare `<wpt>` waypoints. Files come from
-/// route planners (Komoot, RideWithGPS, Garmin) with wildly varying point
-/// density, so consumers thin before doing distance math.
+/// route planners such as Komoot, RideWithGPS and Garmin, with wildly varying
+/// point density, so consumers thin the points before any distance maths.
 
 /// Points of the first non-empty kind found: track > route > waypoints.
-/// Throws [FormatException] when the document isn't GPX or has no points.
+/// Throws [FormatException] when the document is not GPX, or has no points.
 List<LatLng> parseGpx(String content) {
   final XmlDocument doc;
   try {
@@ -37,9 +37,9 @@ LatLng? _point(XmlElement el) {
   return LatLng(lat, lon);
 }
 
-/// Drop points closer than [spacingKm] to the previously kept one;
+/// Drop points closer than [spacingKm] to the previously kept one. The
 /// endpoints always survive. Planner exports can carry a point every few
-/// metres - far denser than closure-distance math needs.
+/// metres, far denser than the closure-distance maths needs.
 List<LatLng> thinRoute(List<LatLng> pts, double spacingKm) {
   if (pts.length < 3) return pts;
   const dist = Distance();
@@ -54,8 +54,8 @@ List<LatLng> thinRoute(List<LatLng> pts, double spacingKm) {
 }
 
 /// Is [p] within [radiusKm] of any of [routePoints]? Callers pass a thinned
-/// route; with ~2 km spacing the corridor edge wobbles by at most ~1 km,
-/// which is noise against a 10 km scouting radius.
+/// route. With about 2 km spacing the corridor edge wobbles by at most about
+/// 1 km, which is noise against a 10 km scouting radius.
 bool nearRoute(List<LatLng> routePoints, LatLng p, double radiusKm) {
   const dist = Distance();
   return routePoints.any(

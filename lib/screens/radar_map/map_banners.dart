@@ -6,12 +6,12 @@ import '../../translate/closure_translator.dart';
 import 'model_download_banner.dart';
 import 'screen_margin.dart';
 
-/// A dismissable error banner, so the caller knows which one the user closed.
+/// A dismissible error banner, so the caller knows which one the user closed.
 enum MapBanner { offline, tiles, radar, location, closures }
 
-/// The stack of status/error banners under the frame controls. Each is shown
-/// only when its condition holds; the model download gets its own animated
-/// banner, the rest are simple error cards.
+/// The stack of status and error banners under the frame controls. Each banner
+/// shows only while its condition holds. The model download gets its own
+/// animated banner, and the rest are simple error cards.
 class MapBanners extends StatelessWidget {
   final bool offline;
   final bool offlineDismissed;
@@ -53,22 +53,22 @@ class MapBanners extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         // One connectivity line covers the whole outage. The per-source radar
-        // and closures failures below are the same lost connection, so they're
-        // suppressed while this shows - no stack of three red cards.
+        // and closures failures below are the same lost connection, so this
+        // banner suppresses them. No stack of three red cards.
         if (offline && !offlineDismissed)
           _error(
             context,
-            'No connection - map, radar, and closures may be stale. '
-            'Retries automatically, or tap ↻.',
+            'No connection. The map, radar and closures may be stale. '
+            'The app retries automatically, or tap ↻.',
             dismiss: MapBanner.offline,
           ),
-        // Non-offline tile failures (server errors, timeouts): visible and
-        // retryable in one tap.
+        // Tile failures that are not an outage (server errors, timeouts):
+        // visible, and retryable in one tap.
         if (!offline && failedTileCount > 0)
           _error(
             context,
             '$failedTileCount map tile${failedTileCount == 1 ? '' : 's'} '
-            'failed to load - tap to retry.',
+            'failed to load. Tap to retry.',
             onTap: onRetryTiles,
             dismiss: MapBanner.tiles,
           ),
@@ -77,8 +77,8 @@ class MapBanners extends StatelessWidget {
         if (english && translatorStatus == TranslatorStatus.failed)
           _error(
             context,
-            'Translation model unavailable - showing Japanese. '
-            '${translatorError ?? ''} Retries on ↻.',
+            'Translation model unavailable. Showing Japanese instead. '
+            '${translatorError ?? ''} Tap ↻ to retry.',
           ),
         if (translating && translatorStatus == TranslatorStatus.ready)
           _error(context, 'Translating closures…'),
@@ -102,10 +102,10 @@ class MapBanners extends StatelessWidget {
 
   /// Rider-facing copy for a raw fetch exception. The raw text (SocketException,
   /// errno, port, URL) is developer noise, so connectivity failures collapse to
-  /// a plain "no connection" line; the raw string is kept only in debug builds.
+  /// a plain 'no connection' line. Only debug builds keep the raw string.
   static String _friendly(String label, String raw) {
     final msg = looksLikeConnectivityError(raw)
-        ? '$label unavailable - no connection.'
+        ? '$label unavailable. No connection.'
         : '$label unavailable right now.';
     return kDebugMode ? '$msg\n$raw' : msg;
   }

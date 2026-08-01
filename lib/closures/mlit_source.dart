@@ -18,7 +18,7 @@ import 'road_closure.dart';
 ///      `backup/{YYYYMMDDHHMMSS}/{random}/` path from a script src.
 ///   2. GET /roadinfo/backup/{ts}/{rand}/TukoKisei/{bureau}.json (live
 ///      regulations) and .../TokiTuko/{bureau}.json (winter closures).
-/// Records are keyed by "{prefCode}_{prefName}" and carry an icon point
+/// Records are keyed by '{prefCode}_{prefName}' and carry an icon point
 /// [lonStr, latStr] plus an embedded GeoJSON LineString of the section.
 class MlitSource {
   static const _base = 'https://www.road-info-prvs.mlit.go.jp/roadinfo';
@@ -34,7 +34,7 @@ class MlitSource {
     );
   }
 
-  /// Closures in [prefs]' bureaus whose point passes [keep].
+  /// Closures in the bureaux of [prefs] whose point passes [keep].
   Future<List<RoadClosure>> fetchWhere(
     List<Prefecture> prefs,
     bool Function(LatLng) keep,
@@ -48,8 +48,8 @@ class MlitSource {
     ];
   }
 
-  /// One regional development bureau. Failures degrade to "no data" so one
-  /// unreachable bureau can't kill the whole search.
+  /// One regional development bureau. A failure degrades to 'no data', so one
+  /// unreachable bureau cannot kill the whole search.
   Future<List<RoadClosure>> _fetchBureau(int bureau) async {
     try {
       final page = await _client
@@ -79,7 +79,7 @@ class MlitSource {
           .get(Uri.parse('$_base/$backup$category/$bureau.json'))
           .timeout(const Duration(seconds: 15));
       if (r.statusCode != 200) return const [];
-      // Explicit UTF-8: package:http defaults to Latin-1 without a charset
+      // Explicit UTF-8. package:http defaults to Latin-1 without a charset
       // header, which mangles the Japanese field values.
       final doc = jsonDecode(utf8.decode(r.bodyBytes));
       if (doc is! Map) return const [];
@@ -102,8 +102,8 @@ class MlitSource {
   RoadClosure? _parseRecord(dynamic rec, String category, int bureau) {
     if (rec is! Map) return null;
 
-    // TukoKisei mixes all regulation types; keep only impassable ones
-    // (kisei_naiyo_cd "01" = 通行止). TokiTuko is winter closures - all kept.
+    // TukoKisei mixes all regulation types, so keep only the impassable ones
+    // (kisei_naiyo_cd '01' = 通行止). TokiTuko is winter closures, all kept.
     final kiseiName = rec['kisei_meisho'] as String? ?? '';
     if (category == 'TukoKisei' &&
         rec['kisei_naiyo_cd'] != '01' &&
@@ -157,7 +157,7 @@ class MlitSource {
     try {
       final geometry = (jsonDecode(geoJson) as Map)['geometry'] as Map;
       final lines = geometryLines(geometry);
-      // Some records omit the geometry type; treat bare coordinates as a
+      // Some records omit the geometry type, so treat bare coordinates as a
       // LineString rather than dropping them.
       return lines.isNotEmpty ? lines : [latLngLine(geometry['coordinates'])];
     } catch (_) {

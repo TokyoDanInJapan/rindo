@@ -6,24 +6,24 @@ import '../../closures/road_closure.dart';
 import '../../translate/closure_translator.dart';
 import '../../translate/translation_controller.dart';
 
-/// Owns "which closures, where": the search area (rider GPS / dropped pin /
-/// loaded GPX route), the fetch and its partial-source errors, and the
-/// loading pulse. Language and translation live in the composed
-/// [TranslationController]; the delegates below keep the screen-facing API
-/// in one place. The screen listens to this and reads its getters; all the
-/// route-vs-point-vs-pin branching lives here as named getters instead of
-/// being re-derived at every call site.
+/// Owns 'which closures, where': the search area, the fetch and its
+/// partial-source errors, and the loading pulse. The search area is the rider
+/// GPS fix, a dropped pin or a loaded GPX route. Language and translation live
+/// in the composed [TranslationController], and the delegates below keep the
+/// screen-facing API in one place. The screen listens to this and reads its
+/// getters. All the branching between route, point and pin lives here as named
+/// getters, instead of being re-derived at every call site.
 class ClosuresController extends ChangeNotifier {
   static const pointRadiusKm = 50.0; // circle around rider/pin
   static const routeRadiusKm = 10.0; // corridor around a GPX route
 
   final ClosureRepository _repo;
 
-  /// Language + translated copies + model-download lifecycle.
+  /// Language, translated copies and the model-download lifecycle.
   final TranslationController translation;
 
-  /// Ring pulse played while a fetch is in flight. Driven here; the map's
-  /// FadeTransition listens to it directly.
+  /// Ring pulse played while a fetch is in flight. It is driven here, and the
+  /// map's FadeTransition listens to it directly.
   final AnimationController pulse;
 
   ClosuresController({
@@ -42,15 +42,16 @@ class ClosuresController extends ChangeNotifier {
          vsync: vsync,
          duration: const Duration(milliseconds: 900),
        ) {
-    // Translation changes (the English swap-in, banner status) repaint the
-    // same listeners as closure changes.
+    // Translation changes, the English swap-in and the banner status, repaint
+    // the same listeners as closure changes.
     translation.addListener(_notify);
   }
 
   final DateTime Function() _now;
 
-  // In-flight fetches/translations outlive the widget tree on teardown;
-  // notifying (or touching the pulse) after dispose is a debug-mode crash.
+  // In-flight fetches and translations outlive the widget tree on teardown.
+  // Notifying after dispose is a debug-mode crash, and so is touching the
+  // pulse.
   bool _disposed = false;
 
   void _notify() {
@@ -68,15 +69,15 @@ class ClosuresController extends ChangeNotifier {
   bool get pinned => _pin != null;
   bool get routeMode => _route != null;
 
-  /// Point mode search centre: the pin wins over the GPS fix. Null in route
-  /// mode (the corridor has no single centre).
+  /// Point mode search centre: the pin wins over the GPS fix. It is null in
+  /// route mode, because the corridor has no single centre.
   LatLng? get searchCenter => _pin ?? _rider;
 
-  /// Centre for per-item distances (list/detail) - null in route mode, where
-  /// a distance-from-a-point would mislead.
+  /// Centre for the per-item distances in the list and detail views. It is
+  /// null in route mode, where a distance from a point would mislead.
   LatLng? get distanceCenter => routeMode ? null : searchCenter;
 
-  /// Radius label/ring for the active mode.
+  /// Radius label and ring for the active mode.
   double get activeRadiusKm => routeMode ? routeRadiusKm : pointRadiusKm;
 
   // ---- data
@@ -91,7 +92,7 @@ class ClosuresController extends ChangeNotifier {
   String get attribution => _repo.attribution;
   Uri get attributionUrl => _repo.attributionUrl;
 
-  // ---- translation delegates, so call sites keep one surface
+  // ---- translation delegates, so that call sites keep one surface
   bool get english => translation.english;
   bool get translating => translation.translating;
   List<RoadClosure> get shown => translation.shown;
@@ -103,8 +104,9 @@ class ClosuresController extends ChangeNotifier {
 
   // ---- mutations
 
-  /// New GPS fix. Refreshes (forced on the very first fix so closures load
-  /// immediately). The screen still owns camera-follow.
+  /// New GPS fix, which triggers a refresh. The refresh is forced on the very
+  /// first fix, so that closures load immediately. The screen still owns
+  /// camera-follow.
   void setRider(LatLng fix) {
     final first = _rider == null;
     _rider = fix;
@@ -139,7 +141,7 @@ class ClosuresController extends ChangeNotifier {
     refresh(force: true);
   }
 
-  /// Surface an error from the screen (e.g. a GPX that failed to parse).
+  /// Surface an error from the screen, a GPX that failed to parse for example.
   void reportError(String message) {
     _error = message;
     _notify();
@@ -152,9 +154,10 @@ class ClosuresController extends ChangeNotifier {
     _notify();
   }
 
-  /// Refetch when never fetched, the centre moved >10 km from the last fetch,
-  /// or the data is older than 15 minutes. A loaded route replaces the point
-  /// query with its corridor; only age/force apply (the route is static).
+  /// Refetch when nothing was ever fetched, when the centre moved more than
+  /// 10 km from the last fetch, or when the data is older than 15 minutes. A
+  /// loaded route replaces the point query with its corridor, where only age
+  /// and force apply, because the route is static.
   Future<void> refresh({required bool force}) async {
     final route = _route;
     final center = searchCenter;
@@ -170,8 +173,8 @@ class ClosuresController extends ChangeNotifier {
     _loading = true;
     _error = null;
     _notify();
-    // The pulsing disc only renders in point mode; don't run a ticker for
-    // an animation nothing shows.
+    // The pulsing disc renders only in point mode, so do not run a ticker for
+    // an animation that nothing shows.
     if (route == null) pulse.repeat(reverse: true);
     try {
       final (all, errors) = route != null
@@ -185,10 +188,11 @@ class ClosuresController extends ChangeNotifier {
       }
       _fetchedAt = center;
       _fetchedTime = _now();
-      // Partial-source failures: show what we got, but say what's missing.
+      // Partial-source failures: show what arrived, but say what is missing.
       _error = errors.isEmpty ? null : errors.join('\n');
-      // Hands the list over: originals show immediately, English copies swap
-      // in when the (cached, usually instant) translation completes.
+      // Hand the list over. The originals show immediately, and the English
+      // copies swap in when the translation completes, which is cached and
+      // usually instant.
       translation.setSource(all);
       _notify();
     } catch (e) {

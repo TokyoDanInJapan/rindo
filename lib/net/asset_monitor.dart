@@ -18,8 +18,8 @@ String assetKindLabel(AssetKind kind) => switch (kind) {
   AssetKind.other => 'Other',
 };
 
-/// URL → kind, keyed off the hosts/paths in radar_map_view.dart, jma_api.dart,
-/// and the feed clients under closures/ and hazards/.
+/// URL → kind, keyed off the hosts and paths in radar_map_view.dart,
+/// jma_api.dart, and the feed clients under closures/ and hazards/.
 AssetKind classifyAsset(Uri url) {
   final host = url.host;
   final path = url.path;
@@ -47,7 +47,7 @@ int? _tileZoom(Uri url, AssetKind kind) {
   return int.tryParse(segs[segs.length - 3]);
 }
 
-/// The radar frame a tile belongs to: the validtime segment of
+/// The radar frame that a tile belongs to: the validtime segment of
 /// `.../{basetime}/none/{validtime}/surf/hrpns/{z}/{x}/{y}.png`.
 String? _frameTime(Uri url, AssetKind kind) {
   if (kind != AssetKind.radarTile) return null;
@@ -60,8 +60,9 @@ String? _frameTime(Uri url, AssetKind kind) {
 /// per-frame dots in the frame strip.
 enum FrameLoadState { pending, loading, loaded, failed }
 
-/// One request's story: what was asked for and how it ended. Mutated in place
-/// by [AssetMonitor] as the request progresses; [endedAt] == null ⇒ in flight.
+/// One request's story: what was asked for and how it ended. [AssetMonitor]
+/// mutates it in place as the request progresses. [endedAt] == null ⇒ in
+/// flight.
 class AssetRequest {
   AssetRequest._(
     this.id,
@@ -94,8 +95,8 @@ class AssetRequest {
       statusCode != null &&
       statusCode! ~/ 100 == 2;
 
-  /// Compact display name: `base 6/56/25`, `radar 8/227/100 @0405`, or
-  /// host/last-segment for the JSON/XML feeds.
+  /// Compact display name: `base 6/56/25`, `radar 8/227/100 @0405`, or the
+  /// host and last segment for the JSON and XML feeds.
   String get shortName {
     final segs = url.pathSegments;
     switch (kind) {
@@ -169,8 +170,8 @@ class KindStats {
 }
 
 /// Records the lifecycle of every HTTP request the app makes (via
-/// [MonitoredClient]) so the debug sheet can show what's in flight, what
-/// failed, and why. Cumulative tallies survive the bounded recent log.
+/// [MonitoredClient]) so the debug sheet can show what is in flight, what
+/// failed, and why. The cumulative tallies survive the bounded recent log.
 class AssetMonitor extends ChangeNotifier {
   static const _recentLimit = 150;
 
@@ -183,14 +184,14 @@ class AssetMonitor extends ChangeNotifier {
   DateTime countingSince = DateTime.now();
 
   /// Per-frame radar tile outcomes, keyed (validtime, zoom). Zoom is part of
-  /// the key so tiles fetched at a previous native level can't masquerade as
-  /// the current level being loaded. Functional UI state (the frame strip's
-  /// dots), so [resetCounters] - a debug affordance - leaves it alone;
-  /// [resetRadarFrames] clears it when the layers re-key.
+  /// the key so that tiles fetched at a previous native level cannot
+  /// masquerade as the current level being loaded. This is functional UI state
+  /// behind the frame strip's dots, so [resetCounters], a debug affordance,
+  /// leaves it alone. [resetRadarFrames] clears it when the layers re-key.
   final Map<(String, int), AssetTally> radarFrames = {};
 
-  // Tile loads arrive in bursts of dozens; coalesce notifications so an open
-  // debug sheet repaints a few times a second, not per tile.
+  // Tile loads arrive in bursts of dozens, so coalesce the notifications. An
+  // open debug sheet then repaints a few times a second, not once per tile.
   Timer? _notifyTimer;
 
   /// Requests still on the wire, oldest first.
@@ -216,10 +217,10 @@ class AssetMonitor extends ChangeNotifier {
     return r;
   }
 
-  /// [FrameLoadState.loaded] means every finished tile came back clean (a 404
-  /// is JMA for "no rain here", so it counts); [FrameLoadState.failed] means
-  /// at least one real failure. Cancellations alone stay [pending] - the map
-  /// simply stopped needing those tiles.
+  /// [FrameLoadState.loaded] means every finished tile came back clean. A 404
+  /// is JMA for 'no rain here', so it counts as clean. [FrameLoadState.failed]
+  /// means at least one real failure. Cancellations alone stay [pending],
+  /// because the map simply stopped needing those tiles.
   FrameLoadState frameState(String validtime, int z) {
     final loading = _active.values.any(
       (r) =>
@@ -233,9 +234,9 @@ class AssetMonitor extends ChangeNotifier {
     return FrameLoadState.pending;
   }
 
-  /// Forget per-frame outcomes - call when the radar layers re-key (retry,
-  /// connectivity healed, frame set replaced) so the dots go back to pending
-  /// until the refetch answers.
+  /// Forget the per-frame outcomes. Call this when the radar layers re-key, on
+  /// a retry, on connectivity healing, or on a replaced frame set. The dots
+  /// then go back to pending until the refetch answers.
   void resetRadarFrames() {
     radarFrames.clear();
     _bump();
@@ -251,8 +252,9 @@ class AssetMonitor extends ChangeNotifier {
   void fail(AssetRequest r, Object error) {
     if (r.endedAt != null) return;
     // flutter_map aborts requests for tiles the map stopped needing (pruned
-    // on pan/zoom). That's cancellation, not failure: counting it as failed
-    // floods the tallies and falsely flips frame dots red during zoom churn.
+    // on pan or zoom). That is a cancellation, not a failure. Counting it as
+    // failed floods the tallies and wrongly flips frame dots red during zoom
+    // churn.
     if (error is RequestAbortedException) {
       cancel(r);
       return;
@@ -290,7 +292,7 @@ class AssetMonitor extends ChangeNotifier {
     _bump();
   }
 
-  /// Zero the tallies and the log; in-flight requests keep tracking.
+  /// Zero the tallies and the log. In-flight requests keep tracking.
   void resetCounters() {
     for (final s in stats.values) {
       s._reset();
@@ -315,10 +317,11 @@ class AssetMonitor extends ChangeNotifier {
   }
 }
 
-/// Wraps any [Client]; reports every request to an [AssetMonitor]. Wrap the
-/// *outermost* client (outside retries) so one logical fetch is one record.
-/// Byte counts are what actually arrived; a listener cancelling the body
-/// stream mid-read records the request as cancelled, not failed.
+/// Wraps any [Client] and reports every request to an [AssetMonitor]. Wrap the
+/// *outermost* client, outside the retries, so that one logical fetch makes
+/// one record. The byte counts are what actually arrived. If a listener
+/// cancels the body stream mid-read, the request is recorded as cancelled, not
+/// failed.
 class MonitoredClient extends BaseClient {
   MonitoredClient(this._inner, this._monitor);
 

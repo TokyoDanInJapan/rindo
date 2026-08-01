@@ -1,6 +1,6 @@
 # Working on this repo
 
-Notes for Claude Code that aren't obvious from the code or the README.
+Notes for Claude Code that the code and the README do not make obvious.
 
 ## `gh pr edit` silently fails on this repo
 
@@ -12,54 +12,55 @@ GraphQL: Projects (classic) is being deprecated in favor of the new Projects
 experience ... (repository.pullRequest.projectCards)
 ```
 
-`gh` asks for `projectCards` as part of the same query it uses to edit a PR, so
-the deprecation error aborts the whole mutation. The PR is left untouched while
-the command looks like it mostly worked — the error mentions Projects, not the
-edit, so it reads as a warning about something you didn't ask for.
+`gh` asks for `projectCards` in the same query it uses to edit a pull
+request, so the deprecation error aborts the whole mutation. `gh` leaves the
+pull request untouched, but the command still looks like it mostly worked.
+The error mentions Projects, not the edit, so it reads as a warning about
+something you did not ask for.
 
-Use the REST API instead, which doesn't touch Projects:
+Use the REST API instead. It does not touch Projects:
 
 ```bash
 gh api -X PATCH repos/TokyoDanInJapan/rindo/pulls/<n> -F body=@body.md
 gh api -X PATCH repos/TokyoDanInJapan/rindo/pulls/<n> -f title='...'
 ```
 
-`-F key=@file` reads the value from a file, which also avoids fighting the
-shell over backticks and quotes in a long description.
+`-F key=@file` reads the value from a file. This also avoids a fight with
+the shell over backticks and quotes in a long description.
 
-**Verify after writing**, whichever route you take — neither reports failure in
-a way you'd notice while skimming:
+**Verify after you write**, whichever route you take. Neither route reports
+failure in a way you would notice while skimming:
 
 ```bash
 gh pr view <n> --json body --jq '.body | contains("some phrase you just wrote")'
 ```
 
-Creating a PR is unaffected: `gh pr create --body-file ...` works normally. It's
-only editing an existing one.
+Creating a pull request is unaffected – `gh pr create --body-file ...` works
+normally. Only the edit of an existing pull request fails.
 
-## Releasing: bump `pubspec.yaml` *before* tagging
+## Releasing: bump `pubspec.yaml` *before* you tag
 
-`.github/workflows/release.yml` refuses a `v*` tag whose version doesn't match
-`pubspec.yaml`:
+`.github/workflows/release.yml` refuses a `v*` tag whose version does not
+match `pubspec.yaml`:
 
 ```
 Tag v0.1.1 != pubspec version 0.1.0 - bump pubspec.yaml
 ```
 
-That check is there for a good reason — the APK announces the pubspec version
-whatever the tag says, so a mismatch ships a build that lies about which release
-it is. But it fails *after* the tag exists, which means a wrong tag has to be
-deleted locally and remotely before you can retry.
+That check is there for a good reason. The APK announces the pubspec version
+whatever the tag says, so a mismatch ships a build that lies about which
+release it is. But the check fails *after* the tag exists. You must then
+delete the wrong tag, locally and remotely, before you can retry.
 
-So the order is:
+So use this order:
 
-1. bump `version:` in `pubspec.yaml` (both parts — `0.1.1+2`; the `+N` build
-   number must increase for Android to accept the upgrade)
-2. commit it to `main`
-3. tag `v0.1.1` and push the tag
+1. Bump `version:` in `pubspec.yaml`. Change both parts – `0.1.1+2`. The
+   `+N` build number must increase before Android accepts the upgrade.
+2. Commit the change to `main`.
+3. Tag `v0.1.1` and push the tag.
 
-A `v*` tag triggers two workflows: **Build APK** (debug-signed, artifact only)
-and **Release**, which builds the signed APKs via `tool/release.sh` and attaches
-them to a GitHub Release. Release needs `KEYSTORE_BASE64` and
-`KEYSTORE_PASSWORD` in the repo's `release` *environment* — not repo secrets, or
-they resolve to empty strings.
+A `v*` tag triggers two workflows. **Build APK** produces a debug-signed
+artifact only. **Release** builds the signed APKs with `tool/release.sh` and
+attaches them to a GitHub Release. Release needs `KEYSTORE_BASE64` and
+`KEYSTORE_PASSWORD` in the repo's `release` *environment*. Repo secrets do
+not work – they resolve to empty strings.

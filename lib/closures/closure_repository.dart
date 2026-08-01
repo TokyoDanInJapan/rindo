@@ -16,9 +16,9 @@ import 'seasonal_gates.dart';
 /// (everything else, notably prefectural roads), plus JMA 土砂災害警戒情報
 /// landslide alerts (municipality-level, they lead the actual closures).
 /// The same closure can appear in several feeds, so near-duplicates are
-/// collapsed with precedence seasonal > MLIT > JARTIC (richer metadata
-/// wins); landslide alerts never collide (no route numbers) and are simply
-/// appended.
+/// collapsed with the precedence seasonal > MLIT > JARTIC, where the richer
+/// metadata wins. Landslide alerts never collide, because they carry no route
+/// numbers, so they are simply appended.
 class ClosureRepository {
   final JarticSource _jartic;
   final MlitSource _mlit;
@@ -45,9 +45,9 @@ class ClosureRepository {
   String get attribution => 'Closures: JARTIC · 国土交通省';
   Uri get attributionUrl => Uri.parse('https://www.jartic.or.jp/map/');
 
-  /// Merged closures plus one message per source that failed. One dead
-  /// source must not blank the list - the bundled seasonal gates work with
-  /// no network at all, and a JARTIC outage shouldn't hide MLIT data.
+  /// Merged closures plus one message per source that failed. One dead source
+  /// must not blank the list. The bundled seasonal gates work with no network
+  /// at all, and a JARTIC outage should not hide MLIT data.
   Future<(List<RoadClosure>, List<String>)> fetchNear(
     LatLng center,
     double radiusKm,
@@ -68,8 +68,8 @@ class ClosureRepository {
     List<LatLng> route,
     double radiusKm,
   ) {
-    // ~2 km spacing keeps the corridor test cheap; the edge wobble that
-    // introduces is noise against a 10 km scouting radius.
+    // A spacing of about 2 km keeps the corridor test cheap. The edge wobble
+    // that introduces is noise against a 10 km scouting radius.
     final thinned = thinRoute(route, 2);
     final prefs = prefecturesAlong(thinned, radiusKm);
     bool keep(LatLng p) => nearRoute(thinned, p, radiusKm);
@@ -104,9 +104,10 @@ class ClosureRepository {
     List<RoadClosure> jartic,
   ) {
     // A live record matching a curated gate that is closed *now* is the gate
-    // itself - the curated entry wins (it carries the reopening date). While
-    // a gate is merely scheduled, a live closure on the same road is a
-    // separate event (typhoon damage in summer, say) and must survive.
+    // itself, so the curated entry wins, because it carries the reopening
+    // date. While a gate is merely scheduled, a live closure on the same road
+    // is a separate event, typhoon damage in summer for example, and must
+    // survive.
     final now = _now();
     final activeGates = [
       for (final s in seasonal)
@@ -148,11 +149,11 @@ class ClosureRepository {
     );
   }
 
-  /// Same route class and number? Digits are normalised (JARTIC serves
-  /// full-width, "国道１６号" vs MLIT's "国道16号"). 都道/道道/府道/県道 count
-  /// as one class: a cross-border prefectural road keeps its number on both
-  /// sides of the border, and the 5 km proximity test already rules out
-  /// same-numbered roads in unrelated prefectures.
+  /// Same route class and number? The digits are normalised, because JARTIC
+  /// serves full-width '国道１６号' against MLIT's '国道16号'. 都道, 道道, 府道
+  /// and 県道 count as one class. A cross-border prefectural road keeps its
+  /// number on both sides of the border, and the 5 km proximity test already
+  /// rules out same-numbered roads in unrelated prefectures.
   bool _sameRoad(String a, String b) {
     final ka = _routeKey(a), kb = _routeKey(b);
     return ka != null && ka == kb;

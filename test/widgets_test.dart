@@ -148,7 +148,7 @@ void main() {
       );
       // Connectivity-shaped errors collapse to a plain line...
       expect(
-        find.textContaining('Radar unavailable - no connection'),
+        find.textContaining('Radar unavailable. No connection'),
         findsOneWidget,
       );
       // ...non-network ones stay generic but readable.
@@ -677,7 +677,10 @@ void main() {
         find.text('CyclOSM · tiles hosted by OpenStreetMap France'),
         findsOneWidget,
       );
-      expect(find.textContaining('never means a road is open'), findsOneWidget);
+      expect(
+        find.textContaining('never means that a road is open'),
+        findsOneWidget,
+      );
 
       await t.tap(find.textContaining('CyclOSM'));
       expect(opened, [Uri.parse('https://www.cyclosm.org')]);
@@ -735,7 +738,7 @@ void main() {
       final shown = showFirstRunDisclaimer(ctx);
       await t.pumpAndSettle();
       expect(find.text('Before you ride'), findsOneWidget);
-      expect(find.textContaining('Obey signage'), findsOneWidget);
+      expect(find.textContaining('Obey the road signs'), findsOneWidget);
       // barrierDismissible: false - tapping outside must not dismiss it.
       await t.tapAt(const Offset(5, 5));
       await t.pumpAndSettle();

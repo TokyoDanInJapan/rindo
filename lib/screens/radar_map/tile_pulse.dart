@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-/// Soft grey pulse used as the loading placeholder for base-map tiles, so
-/// slow loads read as "loading", not "blank map".
+/// Soft grey pulse used as the loading placeholder for base-map tiles, so that
+/// a slow load reads as 'loading', not as 'blank map'.
 class TilePulse extends StatefulWidget {
   const TilePulse({super.key});
 

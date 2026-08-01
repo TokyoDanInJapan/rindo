@@ -1,11 +1,11 @@
 import 'package:latlong2/latlong.dart';
 
-/// GeoJSON positions are `[lon, lat]` (per the spec); these helpers convert
-/// defensively - malformed entries are skipped, never thrown on, because the
+/// GeoJSON positions are `[lon, lat]`, per the spec. These helpers convert
+/// defensively: a malformed entry is skipped, never thrown on, because the
 /// upstream feeds are undocumented and drift.
 
-/// A list of positions -> points. Non-lists and short/typed-wrong entries
-/// are dropped.
+/// A list of positions -> points. Entries that are not lists, that are too
+/// short, or that hold the wrong types are dropped.
 List<LatLng> latLngLine(dynamic positions) => [
   if (positions is List)
     for (final p in positions)

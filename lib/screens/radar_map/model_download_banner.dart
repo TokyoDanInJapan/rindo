@@ -6,8 +6,8 @@ import 'screen_margin.dart';
 
 /// Banner for the one-time translation-model download: an indeterminate bar
 /// plus a live elapsed-time counter. ML Kit's downloadModel exposes no byte
-/// progress, so this is as honest as a "progress bar" can get - motion and
-/// elapsed time, not a made-up percentage.
+/// progress, so this is as honest as a 'progress bar' can get. It shows motion
+/// and elapsed time, not a made-up percentage.
 class ModelDownloadBanner extends StatefulWidget {
   final DateTime startedAt;
 
@@ -39,7 +39,8 @@ class _ModelDownloadBannerState extends State<ModelDownloadBanner> {
     final scheme = Theme.of(context).colorScheme;
     final elapsed = DateTime.now().difference(widget.startedAt).inSeconds;
     return Card(
-      // Informational, not an error - styled apart from the error banners.
+      // Informational, not an error, so it is styled apart from the error
+      // banners.
       color: scheme.secondaryContainer,
       margin: const EdgeInsets.fromLTRB(screenMargin, 4, screenMargin, 0),
       child: Padding(
@@ -49,7 +50,7 @@ class _ModelDownloadBannerState extends State<ModelDownloadBanner> {
           children: [
             Text(
               'Downloading the offline translation model '
-              '(~60 MB, one time)… ${elapsed}s',
+              '(about 60 MB, one time)… ${elapsed}s',
               style: TextStyle(color: scheme.onSecondaryContainer),
             ),
             const SizedBox(height: 8),

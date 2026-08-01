@@ -6,13 +6,13 @@ import 'package:latlong2/latlong.dart';
 import '../../jma/jma_forecast.dart';
 import 'weather_presentation.dart';
 
-/// What tapping a place on the map offers. Weather is the reason it exists;
-/// clearing the pin used to be the pin's own tap action, so it moves in here
-/// rather than being lost.
+/// What tapping a place on the map offers. Weather is the reason this sheet
+/// exists. Clearing the pin used to be the pin's own tap action, so it moves in
+/// here rather than being lost.
 ///
-/// The rider marker gets the same sheet with one entry - a menu of one is
+/// The rider marker gets the same sheet with one entry. A menu of one is
 /// thinner than it could be, but it keeps a single tap gesture meaning a single
-/// thing wherever it lands, and leaves somewhere obvious to hang the next
+/// thing wherever it lands, and it leaves somewhere obvious to hang the next
 /// per-place action.
 void showPlaceSheet(
   BuildContext context, {
@@ -56,15 +56,16 @@ void showPlaceSheet(
 
 /// Bottom sheet for the JMA area forecast at a point on the map.
 ///
-/// Fetches when it opens rather than being handed a report: the rider asks for
-/// the weather *somewhere*, and holding a prefetched forecast for a position
-/// they might never tap would mean refetching it on every pan. Same bottom
-/// padding as the closure sheets, so the source button clears the navigation
-/// overlay.
+/// The sheet fetches when it opens, rather than being handed a report. The
+/// rider asks for the weather *somewhere*, and holding a prefetched forecast
+/// for a position they might never tap would mean refetching it on every pan.
+/// It uses the same bottom padding as the closure sheets, so the source button
+/// clears the navigation overlay.
+///
 /// [translate] is supplied only in English mode. The report shows in Japanese
-/// the moment it arrives and the English swaps in behind it, rather than the
-/// spinner sitting there through a first-run model download - the same order
-/// the closure list uses, and the reason the fetch and the translation are two
+/// the moment it arrives, and the English swaps in behind it. The spinner does
+/// not sit there through a first-run model download. This is the same order
+/// the closure list uses, and it is why the fetch and the translation are two
 /// steps here instead of one composed future.
 void showWeatherSheet(
   BuildContext context, {
@@ -73,15 +74,16 @@ void showWeatherSheet(
   required void Function(Uri) onOpenSource,
   Future<WeatherReport> Function(WeatherReport)? translate,
 }) {
-  // Started before the sheet builds, so a rebuild (drag, keyboard, rotation)
-  // can't kick off a second fetch.
+  // Started before the sheet builds, so a rebuild from a drag, the keyboard or
+  // a rotation cannot start a second fetch.
   final pending = load(at);
   // FutureBuilder only subscribes once the route has built, a frame later. A
-  // fetch that fails inside that window - an instant "no forecast area here",
-  // or a socket that's already dead - would otherwise have no listener at the
-  // moment it completes and get reported as an unhandled async error, which in
-  // debug builds is a red screen over the map. Claiming the error here marks it
-  // handled; FutureBuilder still receives it and renders the message.
+  // fetch that fails inside that window would otherwise have no listener at
+  // the moment it completes, and would be reported as an unhandled async
+  // error. In debug builds that is a red screen over the map. Such a fetch is
+  // an instant 'no forecast area here', or a socket that is already dead.
+  // Claiming the error here marks it handled, and FutureBuilder still receives
+  // it and renders the message.
   unawaited(pending.then<void>((_) {}, onError: (Object _, StackTrace _) {}));
   showModalBottomSheet(
     context: context,
@@ -89,8 +91,8 @@ void showWeatherSheet(
     isScrollControlled: true,
     builder: (ctx) => DraggableScrollableSheet(
       expand: false,
-      // Two tables plus the wording need the room; the rider can still drag it
-      // up to 0.9 or down out of the way.
+      // Two tables plus the wording need the room. The rider can still drag
+      // the sheet up to 0.9, or down out of the way.
       initialChildSize: 0.7,
       maxChildSize: 0.9,
       builder: (ctx, scroll) => FutureBuilder<WeatherReport>(
@@ -125,16 +127,17 @@ void showWeatherSheet(
   );
 }
 
-/// The rider is on a bike in the rain; "JmaForecastException: forecast 503"
-/// helps nobody. Connectivity and coverage are the two they can act on.
+/// The rider is on a bike in the rain, and 'JmaForecastException: forecast
+/// 503' helps nobody. Connectivity and coverage are the two things they can
+/// act on.
 String _friendlyError(Object error) {
   final raw = '$error';
   if (raw.contains('no JMA forecast area')) {
-    return "JMA doesn't publish a forecast for this position - it only covers "
-        'Japan. Move the map (or drop a pin) somewhere inland.';
+    return 'JMA does not publish a forecast for this position, because it '
+        'only covers Japan. Move the map, or drop a pin, somewhere inland.';
   }
-  return "Couldn't reach the JMA forecast just now. Check your connection and "
-      'try again.';
+  return 'Could not reach the JMA forecast just now. Check your connection, '
+      'then try again.';
 }
 
 class _Centred extends StatelessWidget {
@@ -147,10 +150,10 @@ class _Centred extends StatelessWidget {
 }
 
 /// Shows the report as fetched, then replaces it with the English copy once
-/// that lands. Stateful because the translation is a second, slower step: the
-/// first one ever can be a ~30 MB model download, and a rider who opened the
-/// sheet to decide whether to set off should be reading JMA's Japanese in the
-/// meantime rather than a spinner.
+/// that lands. It is stateful because the translation is a second, slower
+/// step. The first translation of all can be a 30 MB model download, and a
+/// rider who opened the sheet to decide whether to set off should be reading
+/// JMA's Japanese in the meantime rather than a spinner.
 class _MaybeTranslated extends StatefulWidget {
   const _MaybeTranslated({
     required this.report,
@@ -170,11 +173,12 @@ class _MaybeTranslated extends StatefulWidget {
 
 class _MaybeTranslatedState extends State<_MaybeTranslated> {
   late WeatherReport _shown = widget.report;
-  // Seeded rather than set from initState: the async body below runs
+  // Seeded rather than set from initState. The async body below runs
   // synchronously up to its first await, so flipping this with setState would
-  // be a setState during the build that is mounting this very widget. Harmless
-  // today (the element is already dirty, so markNeedsBuild is a no-op) but only
-  // by accident, and it reads like a bug either way.
+  // be a setState during the build that is mounting this very widget. That is
+  // harmless today, because the element is already dirty and markNeedsBuild is
+  // a no-op, but it is harmless only by accident. It reads like a bug either
+  // way.
   late bool _translating = widget.translate != null;
 
   @override
@@ -191,7 +195,7 @@ class _MaybeTranslatedState extends State<_MaybeTranslated> {
       if (mounted) setState(() => _shown = english);
     } catch (_) {
       // Same contract as the closure list: a translation that fails leaves
-      // the Japanese on screen. It's the source of record either way.
+      // the Japanese on screen. It is the source of record either way.
     } finally {
       if (mounted) setState(() => _translating = false);
     }
@@ -237,7 +241,7 @@ class _Report extends StatelessWidget {
         Row(
           children: [
             Expanded(child: Text(report.areaName, style: text.titleLarge)),
-            // Deliberately understated: the Japanese below it is readable and
+            // Deliberately understated. The Japanese below it is readable and
             // correct, so this is progress, not a blocked state.
             if (translating) ...[
               const SizedBox(
@@ -320,9 +324,9 @@ class _Report extends StatelessWidget {
     );
   }
 
-  /// "Today"/"Tomorrow" where that's true, otherwise a bare date - the forecast
-  /// only ever reaches a couple of days out, so a weekday name would be more
-  /// words for no more information.
+  /// 'Today' or 'Tomorrow' where that is true, otherwise a bare date. The
+  /// forecast only ever reaches a couple of days out, so a weekday name would
+  /// be more words for no more information.
   static String _dayLabel((int, int) day, (int, int) today) {
     if (day == today) return 'Today';
     final tomorrow = jstDate(
@@ -335,11 +339,11 @@ class _Report extends StatelessWidget {
 
 /// One titled block, ruled off from the one above it.
 ///
-/// The sheet stacks five kinds of thing that look alike at a glance - two
-/// tables of numbers, two runs of Japanese prose, and the attribution - so
-/// without a rule between them a thumb-scroll reads as one long column and it
-/// stops being obvious which numbers belong to which day range. The line does
-/// the separating; the title says what you're looking at.
+/// The sheet stacks five kinds of thing that look alike at a glance: two
+/// tables of numbers, two runs of Japanese prose, and the attribution. Without
+/// a rule between them, a thumb-scroll reads as one long column, and it stops
+/// being obvious which numbers belong to which day range. The line does the
+/// separating, and the title says what you are looking at.
 class _Section extends StatelessWidget {
   const _Section({required this.title, required this.child});
 
@@ -355,7 +359,7 @@ class _Section extends StatelessWidget {
       const SizedBox(height: 12),
       Text(
         title,
-        // Quiet and lettered-out: a signpost, not a competitor for the
+        // Quiet and lettered out. It is a signpost, not a competitor for the
         // forecast underneath it.
         style: Theme.of(context).textTheme.labelMedium?.copyWith(
           letterSpacing: 1.1,
@@ -368,13 +372,14 @@ class _Section extends StatelessWidget {
   );
 }
 
-/// Anything from "likely" upward is the number a rider changes plans over.
+/// Anything from 'likely' upward is the number a rider changes plans over.
 const _notableRain = 50;
 
 /// The 6-hour blocks JMA reports rain chance in, as its own page columns them.
-/// Fixed rather than derived from the response: a block that has already passed
-/// is simply dropped from the data, and a table whose columns move about
-/// between morning and afternoon is harder to read than one with a gap in it.
+/// They are fixed rather than derived from the response. A block that has
+/// already passed is simply dropped from the data, and a table whose columns
+/// move about between morning and afternoon is harder to read than one with a
+/// gap in it.
 const _rainBlocks = [0, 6, 12, 18];
 
 /// The chance published for the block starting at [hour], or null if JMA no
@@ -402,7 +407,7 @@ Widget _cell(Widget child, {Alignment align = Alignment.center}) => Padding(
 /// carrying the icon and temperatures, then rain chance as a grid of fixed
 /// 6-hour blocks.
 ///
-/// JMA's wording is the one thing that does *not* go in a cell - 「くもり時々晴
+/// JMA's wording is the one thing that does *not* go in a cell. 「くもり時々晴
 /// れ夜のはじめ頃一時雨所により夕方から雷を伴い激しく降る」in a column two
 /// fingers wide is a vertical smear. It sits under the table instead, where it
 /// stays a sentence, which is what makes it worth more than the icon above it.
@@ -518,7 +523,7 @@ class _NearTerm extends StatelessWidget {
 /// JMA's wording for each day, kept out of the table above it: 「くもり時々晴れ
 /// 夜のはじめ頃一時雨所により夕方から雷を伴い激しく降る」in a column two fingers
 /// wide is a vertical smear. As a sentence it stays the most informative thing
-/// on the sheet - it's the part an icon can't carry.
+/// on the sheet, because it is the part an icon cannot carry.
 class _Wording extends StatelessWidget {
   const _Wording({required this.days, required this.label});
 
@@ -617,7 +622,8 @@ class _WeekTable extends StatelessWidget {
           TableRow(
             children: [
               // JMA's own confidence grade. A forecast five days out with a C
-              // beside it is worth planning around differently to one with an A.
+              // beside it is worth planning around differently from one with
+              // an A.
               _cell(Text('Conf.', style: text.bodySmall)),
               for (final d in week)
                 _cell(Text(d.reliability ?? '–', style: text.bodySmall)),

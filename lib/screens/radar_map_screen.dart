@@ -32,9 +32,9 @@ import 'radar_map/weather_sheet.dart';
 import '../net/tile_http_client.dart';
 import '../net/tile_status.dart';
 
-/// Rider-centred rain radar over a CyclOSM cycling base map, with nearby
-/// road closures overlaid. One screen, plain setState; the widgets live in
-/// `radar_map/`, this file owns the state and the layer stack.
+/// Rider-centred rain radar over a CyclOSM cycling base map, with nearby road
+/// closures overlaid. One screen, plain setState. The widgets live in
+/// `radar_map/`, and this file owns the state and the layer stack.
 class RadarMapScreen extends StatefulWidget {
   const RadarMapScreen({super.key});
 
@@ -51,45 +51,48 @@ class _RadarMapScreenState extends State<RadarMapScreen>
 
   final _mapController = MapController();
 
-  // Every HTTP fetch - tiles, JMA indexes, closures feeds - reports its
-  // lifecycle here, so the debug sheet can show what's in flight, what
-  // failed at which zoom, and why.
+  // Every HTTP fetch reports its lifecycle here: the tiles, the JMA indexes
+  // and the closures feeds. The debug sheet can then show what is in flight,
+  // what failed at which zoom, and why.
   final _assets = AssetMonitor();
 
-  // One shared, deadline-guarded client for every tile layer (base + radar).
-  // Injected so flutter_map doesn't close it when a layer re-keys; we own its
-  // lifecycle. The deadline is what stops a stalled tile from hanging forever
-  // (see tile_http_client.dart).
+  // One shared, deadline-guarded client for every tile layer, base and radar.
+  // It is injected so that flutter_map does not close it when a layer re-keys.
+  // This screen owns its lifecycle. The deadline is what stops a stalled tile
+  // from hanging forever, see tile_http_client.dart.
   late final _tileClient = MonitoredClient(tileHttpClient(), _assets);
 
-  // Shared client for the JSON/XML feeds (JMA targetTimes, closures sources).
+  // Shared client for the JSON and XML feeds: JMA targetTimes and the closures
+  // sources.
   late final _apiClient = MonitoredClient(Client(), _assets);
 
   late final _jma = JmaApi(client: _apiClient);
 
   // Shares the monitored feed client, so a weather fetch shows up in the debug
-  // sheet alongside everything else. No state of its own: the sheet fetches
-  // when it opens and the report dies with it.
+  // sheet alongside everything else. It has no state of its own. The sheet
+  // fetches when it opens, and the report dies with it.
   late final _forecast = JmaForecastApi(client: _apiClient);
 
-  // Closures, translation, and the search area (rider/pin/route) all live in
-  // the controller; the screen just drives the camera and reads its getters.
+  // Closures, translation and the search area all live in the controller. The
+  // search area is the rider, the pin or the route. The screen just drives the
+  // camera and reads the controller's getters.
   late final ClosuresController _closures = ClosuresController(
     vsync: this,
     repository: ClosureRepository(client: _apiClient),
   );
 
-  // Greyscale base map by default (like JMA's own nowcast page) so radar and
-  // closures pop; the map view applies the filter, the FAB toggles this.
+  // Greyscale base map by default, like JMA's own nowcast page, so that the
+  // radar and the closures stand out. The map view applies the filter, and the
+  // palette button toggles this flag.
   bool _greyscale = true;
 
   // Offline heuristic, tile epoch, banner-dismissed state, cold-start grace.
   final _connectivity = ConnectivityMonitor();
 
-  // Radar frames: the list + refresh cycle, playback, error linger, and the
-  // fast-reconnect backoff. On success the monitor heals (re-keying tiles if
-  // there was an outage); on a frame-set swap the per-tile bookkeeping resets
-  // so stale failures don't pin the banner.
+  // Radar frames: the list and its refresh cycle, the playback, the error
+  // linger, and the fast-reconnect backoff. On success the monitor heals, and
+  // re-keys the tiles if there was an outage. On a frame-set swap the per-tile
+  // bookkeeping resets, so that stale failures do not pin the banner.
   late final RadarFrameController _radar = RadarFrameController(
     loadFrames: _jma.getFrames,
     onLoaded: () {
@@ -105,40 +108,43 @@ class _RadarMapScreenState extends State<RadarMapScreen>
     onReconnect: () => _closures.refresh(force: false),
   );
 
-  // Camera-follow: on by default, disengaged by a manual pan or a pin/route.
+  // Camera-follow: on by default, disengaged by a manual pan, a pin or a
+  // route.
   bool _follow = true;
   String? _locationError;
   StreamSubscription<Position>? _posSub;
 
-  // Current map bearing (degrees, 0 == north-up). Drives the compass button,
-  // which only appears when the map is turned off north. Fed by the map
-  // event stream, NOT MapOptions.onPositionChanged: flutter_map only fires
-  // that for moves - a rotation-only change (the compass tap, a clean
-  // two-finger twist) never reaches it, which left the needle frozen.
-  // A ValueNotifier (not setState) so only the compass repaints.
+  // Current map bearing in degrees, where 0 is north-up. It drives the compass
+  // button, which appears only when the map is turned off north. It is fed by
+  // the map event stream, NOT by MapOptions.onPositionChanged. flutter_map
+  // fires that only for moves, so a rotation-only change never reaches it,
+  // which left the needle frozen. Such a change comes from the compass tap or
+  // a clean two-finger twist. This is a ValueNotifier rather than setState, so
+  // that only the compass repaints.
   final _rotation = ValueNotifier<double>(0);
   StreamSubscription<MapEvent>? _mapEvents;
 
-  // Auto-dismiss timer for the transient closures error banner. (Location
-  // errors are persistent states - permission/service - so they don't
-  // auto-hide.)
+  // Auto-dismiss timer for the transient closures error banner. Location
+  // errors are persistent states, about permission or the service, so they do
+  // not auto-hide.
   Timer? _closuresErrorTimer;
   String? _lastClosuresError;
 
-  // Failed-tile bookkeeping for the "N tiles failed - tap to retry" banner
-  // and the per-tile broken placeholders.
+  // Failed-tile bookkeeping for the retry banner that counts failed tiles, and
+  // for the per-tile broken placeholders.
   final _tileStatus = TileStatusMonitor();
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Repaint on any closures/translation/search-area change.
+    // Repaint on any change to the closures, the translation or the search
+    // area.
     _closures.addListener(_onClosuresChanged);
-    // Frames/index/epoch/offline all drive the map stack itself, so these
-    // repaint the whole screen. (The 5 Hz asset chatter and per-tile failure
-    // counts deliberately do NOT - their consumers rebuild themselves via
-    // scoped ListenableBuilders in build().)
+    // The frames, the index, the epoch and the offline state all drive the map
+    // stack itself, so these repaint the whole screen. The 5 Hz asset chatter
+    // and the per-tile failure counts deliberately do NOT. Their consumers
+    // rebuild themselves through scoped ListenableBuilders in build().
     _radar.addListener(_repaint);
     _connectivity.addListener(_repaint);
     _mapEvents = _mapController.mapEventStream.listen(
@@ -176,8 +182,8 @@ class _RadarMapScreenState extends State<RadarMapScreen>
 
   void _onClosuresChanged() {
     if (!mounted) return;
-    // Auto-hide a freshly-raised closures error after a few seconds; a later
-    // failed fetch raises a new one and re-arms this.
+    // Auto-hide a freshly raised closures error after a few seconds. A later
+    // failed fetch raises a new one and arms this timer again.
     final err = _closures.error;
     if (err != null && err != _lastClosuresError) {
       _closuresErrorTimer?.cancel();
@@ -243,24 +249,25 @@ class _RadarMapScreenState extends State<RadarMapScreen>
 
   // ------------------------------------------------------------- GPX route
 
-  /// FAB action: pick a .gpx to scout, or clear the loaded one.
+  /// Route button action: pick a .gpx to scout, or clear the loaded one.
   Future<void> _pickOrClearRoute() async {
     if (_closures.routeMode) {
       _closures.clearRoute();
       return;
     }
     try {
-      // No extension filter: Android greys .gpx out under one because the
+      // No extension filter. Android greys .gpx out under one, because the
       // MIME type is unregistered. copyFileToCacheDir gives a readable path
-      // even for cloud/Downloads content: URIs.
+      // even for the content: URIs of cloud storage and Downloads.
       final path = await FlutterFileDialog.pickFile(
         params: const OpenFileDialogParams(copyFileToCacheDir: true),
       );
       if (path == null) return; // cancelled
       final file = File(path);
       final content = await file.readAsString();
-      // The picker copied the file into our cache dir; parsed, it's garbage -
-      // without this, every picked route accumulates there.
+      // The picker copied the file into the cache directory. Once it is
+      // parsed, that copy is rubbish. Without this, every picked route
+      // accumulates there.
       try {
         await file.delete();
       } catch (_) {}
@@ -282,7 +289,7 @@ class _RadarMapScreenState extends State<RadarMapScreen>
 
   // --------------------------------------------------------- connectivity
 
-  /// Retry every failed tile: re-key the layers and clear the bookkeeping.
+  /// Retry every failed tile. Re-key the layers and clear the bookkeeping.
   void _retryTiles() {
     _tileStatus.reset();
     _assets.resetRadarFrames();
@@ -293,8 +300,8 @@ class _RadarMapScreenState extends State<RadarMapScreen>
   /// _rotation, which hides the compass.
   void _faceNorth() => _mapController.rotate(0);
 
-  /// Tile-layer error hook. JMA 404s (rain-free tiles) are filtered by the
-  /// monitor; socket-level failures additionally drive the offline banner.
+  /// Tile-layer error hook. The monitor filters out the JMA 404s from
+  /// rain-free tiles. Socket-level failures also drive the offline banner.
   void _onTileError(
     String layer,
     TileImage tile,
@@ -305,9 +312,10 @@ class _RadarMapScreenState extends State<RadarMapScreen>
     _connectivity.recordTileError(error);
   }
 
-  /// The × on an error banner: clear that error's source so it stays hidden
-  /// until the condition recurs. (Offline keeps its recovery state - only the
-  /// banner is suppressed - so tiles still refetch when the network returns.)
+  /// The × on an error banner. Clear that error's source, so it stays hidden
+  /// until the condition recurs. Offline keeps its recovery state, and only
+  /// the banner is suppressed, so tiles still refetch when the network
+  /// returns.
   void _dismissBanner(MapBanner banner) {
     switch (banner) {
       case MapBanner.offline:
@@ -341,7 +349,8 @@ class _RadarMapScreenState extends State<RadarMapScreen>
             initialCenter: _closures.rider ?? _fallbackCenter,
             initialZoom: _initialZoom,
             onCameraGesture: () {
-              // A manual pan breaks follow mode until the FAB re-enables it.
+              // A manual pan breaks follow mode until the locate button
+              // enables it again.
               if (_follow) setState(() => _follow = false);
             },
             onLongPress: (latLng) {
@@ -357,9 +366,9 @@ class _RadarMapScreenState extends State<RadarMapScreen>
           SafeArea(
             child: Column(
               children: [
-                // Rebuilds as tile fetches land (the per-frame load dots) -
-                // scoped here so the ~5 Hz asset chatter doesn't repaint the
-                // whole map stack.
+                // Rebuilds as tile fetches land, for the per-frame load dots.
+                // It is scoped here so that the roughly 5 Hz asset chatter
+                // does not repaint the whole map stack.
                 ListenableBuilder(
                   listenable: _assets,
                   builder: (context, _) => FrameControls(
@@ -377,9 +386,9 @@ class _RadarMapScreenState extends State<RadarMapScreen>
                   listenable: _tileStatus,
                   builder: (context, _) => MapBanners(
                     // Hold the connectivity banners during the cold-start
-                    // grace so a momentary launch gap doesn't flash before
-                    // the first retry lands. Informational banners
-                    // (translation) still show.
+                    // grace, so that a momentary launch gap does not flash
+                    // before the first retry lands. The informational
+                    // banners, such as translation, still show.
                     offline:
                         _connectivity.pastStartupGrace &&
                         _connectivity.isOffline,
@@ -432,8 +441,8 @@ class _RadarMapScreenState extends State<RadarMapScreen>
         onToggleGreyscale: () => setState(() => _greyscale = !_greyscale),
         onShowClosures: _showList,
         onRefresh: () {
-          // Re-key the tile layers too: retries any tiles that errored
-          // (flutter_map won't by itself).
+          // Re-key the tile layers too. That retries any tiles that errored,
+          // which flutter_map will not do by itself.
           _retryTiles();
           _radar.load();
           _closures.refresh(force: true);
@@ -448,8 +457,8 @@ class _RadarMapScreenState extends State<RadarMapScreen>
     );
   }
 
-  /// The even level the radar layers are pinned to right now (see
-  /// jmaNativeZoom); falls back to the initial zoom before first layout.
+  /// The even level the radar layers are pinned to right now, see
+  /// jmaNativeZoom. It falls back to the initial zoom before the first layout.
   int get _radarNativeZoom {
     double zoom;
     try {
@@ -469,7 +478,7 @@ class _RadarMapScreenState extends State<RadarMapScreen>
   void _showDebug() =>
       showAssetDebugSheet(context, monitor: _assets, snapshot: _debugState);
 
-  /// Fresh snapshot for the debug sheet; called on each of its repaints.
+  /// Fresh snapshot for the debug sheet, called on each of its repaints.
   DebugScreenState _debugState() {
     MapCamera? cam;
     try {
@@ -518,7 +527,7 @@ class _RadarMapScreenState extends State<RadarMapScreen>
     },
   );
 
-  /// Tap on the rider dot or the scouting pin: what's available *here*.
+  /// Tap on the rider dot or the scouting pin: what is available *here*.
   void _showPlace(LatLng point, {required bool pinned}) => showPlaceSheet(
     context,
     pinned: pinned,

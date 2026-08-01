@@ -4,14 +4,15 @@ import '../../jma/jma_api.dart';
 import '../../net/asset_monitor.dart';
 import 'screen_margin.dart';
 
-/// The radar timeline: play/pause, a frame scrubber with a per-frame
-/// load-state dot beneath each stop, and the active frame's JST time +
-/// offset label (or a spinner while the frame index loads).
+/// The radar timeline: a play and pause control, a frame scrubber with a
+/// per-frame load-state dot beneath each stop, and the active frame's JST time
+/// and offset label. A spinner shows there instead while the frame index
+/// loads.
 class FrameControls extends StatelessWidget {
   final List<JmaFrame> frames;
   final int frameIndex;
 
-  /// Parallel to [frames]: whether each frame's tiles have arrived.
+  /// Parallel to [frames]: whether each frame's tiles have arrived yet.
   final List<FrameLoadState> frameStatus;
   final bool playing;
   final VoidCallback onPlayPause;
@@ -62,10 +63,10 @@ class FrameControls extends StatelessWidget {
                     divisions: (frames.length - 1).clamp(1, 99),
                     onChanged: frames.isEmpty ? null : (v) => onSeek(v.round()),
                   ),
-                  // One dot per frame, coloured by tile load state, so a
-                  // frame whose radar imagery is missing (still loading, or
-                  // failed) is visible at a glance. spaceBetween roughly
-                  // lines the dots up with the slider stops.
+                  // One dot per frame, coloured by tile load state, so that a
+                  // frame whose radar imagery is missing shows at a glance.
+                  // Missing means still loading, or failed. spaceBetween
+                  // roughly lines the dots up with the slider stops.
                   if (frames.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),

@@ -7,8 +7,8 @@ import '../../jma/jma_api.dart';
 import '../../net/asset_monitor.dart';
 
 /// Snapshot of everything the screen knows about loading, taken fresh each
-/// time the sheet repaints. Defaults exist only so tests can build partials;
-/// the screen passes every field.
+/// time the sheet repaints. The defaults exist only so that tests can build
+/// partial snapshots. The screen passes every field.
 class DebugScreenState {
   final double? cameraZoom;
   final String? cameraCenter;
@@ -22,7 +22,7 @@ class DebugScreenState {
   final List<JmaFrame> frames;
   final int frameIndex;
 
-  /// The even level the radar layers are pinned to (see jmaNativeZoom);
+  /// The even level the radar layers are pinned to, see jmaNativeZoom. The
   /// per-frame load states in the report are for this zoom.
   final int? radarNativeZoom;
   final String? radarError;
@@ -95,10 +95,11 @@ String _tallyLine(AssetTally t, int active) {
   return parts.join(' · ');
 }
 
-/// The whole debug story as plain text: shown in the sheet and copied to the
-/// clipboard verbatim, so what gets pasted into a bug report is exactly what
-/// was on screen. The per-zoom average body size is the tell for "no rain at
-/// this zoom": JMA serves blank tiles as tiny 200s, not 404s.
+/// The whole debug story as plain text. It is shown in the sheet and copied to
+/// the clipboard word for word, so what gets pasted into a bug report is
+/// exactly what was on screen. The per-zoom average body size is the tell for
+/// 'no rain at this zoom', because JMA serves blank tiles as tiny 200s, not as
+/// 404s.
 String buildAssetDebugReport({
   required AssetMonitor monitor,
   required DebugScreenState s,
@@ -240,8 +241,9 @@ Future<void> showAssetDebugSheet(
   ),
 );
 
-/// Live view of [buildAssetDebugReport]: repaints on monitor activity and on
-/// a 1 s tick (for in-flight ages), with copy-to-clipboard and counter reset.
+/// Live view of [buildAssetDebugReport]. It repaints on monitor activity, and
+/// on a 1 s tick to keep the in-flight ages current. It offers copy to
+/// clipboard and a counter reset.
 class AssetDebugSheet extends StatefulWidget {
   final AssetMonitor monitor;
   final DebugScreenState Function() snapshot;

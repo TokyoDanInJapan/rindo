@@ -15,9 +15,10 @@ import 'disclaimer.dart';
 import 'tile_pulse.dart';
 
 /// The full map: prefecture skeleton, base tiles, stacked radar frames, the
-/// search overlay (route track or ring+pulse), closure geometry/markers, the
-/// rider and pin markers, and the attribution. Reads the [ClosuresController]
-/// for the search area + closures; the screen owns the camera and wiring.
+/// search overlay (a route track, or a ring and its pulse), closure geometry
+/// and markers, the rider and pin markers, and the attribution. It reads the
+/// [ClosuresController] for the search area and the closures. The screen owns
+/// the camera and the wiring.
 class RadarMapView extends StatelessWidget {
   final MapController mapController;
   final ClosuresController closures;
@@ -34,21 +35,21 @@ class RadarMapView extends StatelessWidget {
   final LatLng initialCenter;
   final double initialZoom;
 
-  /// A gesture pan happened - the screen breaks camera-follow. (Rotation is
-  /// NOT reported from here: MapOptions.onPositionChanged doesn't fire for
+  /// A gesture pan happened, so the screen breaks camera-follow. (Rotation is
+  /// NOT reported from here. MapOptions.onPositionChanged does not fire for
   /// rotation-only changes, so the screen watches the map event stream.)
   final VoidCallback onCameraGesture;
   final void Function(LatLng) onLongPress;
 
-  /// A tap on the rider dot or the scouting pin - the screen offers the
-  /// weather there (and, for the pin, clearing it).
+  /// A tap on the rider dot or the scouting pin. The screen then offers the
+  /// weather there, and for the pin it also offers to clear the pin.
   final void Function(LatLng point, {required bool pinned}) onShowPlace;
 
   final void Function(RoadClosure) onShowDetail;
   final void Function(Uri) onOpenUrl;
 
-  /// Tile failure hook, labelled 'base' or 'radar' so expected radar 404s
-  /// can be told apart from real failures.
+  /// Tile failure hook, labelled 'base' or 'radar' so that the expected radar
+  /// 404s can be told apart from real failures.
   final void Function(String layer, TileImage, Object, StackTrace?) onTileError;
 
   /// Retry everything (the screen bumps the tile epoch). Wired to taps on
@@ -77,18 +78,19 @@ class RadarMapView extends StatelessWidget {
 
   static const _userAgent = 'com.hebberd.rindo';
 
-  /// How long the camera must hold still before tiles react to it. A gesture
-  /// emits camera events every frame, and reacting to each one fetches tiles
-  /// for camera states that are gone a frame later - on a marginal mobile
-  /// link that mid-gesture burst is what floods the connection (see
-  /// tile_http_client.dart). Debouncing fetches once, for the camera the
-  /// user actually settles on. GPS follow-mode moves are discrete (~1/s),
-  /// well over this delay, so riding along still loads promptly.
+  /// How long the camera must hold still before the tiles react to it. A
+  /// gesture emits camera events every frame, and reacting to each one fetches
+  /// tiles for camera states that are gone a frame later. On a marginal mobile
+  /// link that mid-gesture burst is what floods the connection, see
+  /// tile_http_client.dart. Debouncing fetches once, for the camera the user
+  /// actually settles on. GPS follow-mode moves are discrete, about one a
+  /// second, which is well over this delay, so riding along still loads
+  /// promptly.
   static const _settleDelay = Duration(milliseconds: 250);
 
   static const _cyclosmUrl =
       'https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png';
-  // English-labelled world basemap (Esri; note the {y}/{x} order).
+  // English-labelled world base map from Esri. Note the {y}/{x} order.
   static const _esriUrl =
       'https://server.arcgisonline.com/ArcGIS/rest/services/'
       'World_Street_Map/MapServer/tile/{z}/{y}/{x}';
@@ -100,7 +102,7 @@ class RadarMapView extends StatelessWidget {
     0, 0, 0, 1, 0,
   ];
 
-  // Built once - the prefecture rings never change.
+  // Built once, because the prefecture rings never change.
   static final _outline = [
     for (final ring in japanOutline)
       Polyline(
@@ -110,16 +112,16 @@ class RadarMapView extends StatelessWidget {
       ),
   ];
 
-  // Explicit provider for every tile layer, so we control the client and,
-  // crucially, disable flutter_map 8's process-wide built-in cache singleton.
-  // That singleton is the one piece of the base-tile path a tile-epoch re-key
-  // can't reset, so a bad state in it survives every in-app retry and clears
-  // only on a full restart. Live radar doesn't need cross-session tile caching
-  // anyway. Cheap to build per rebuild: the client is injected, so no client
-  // is created and layer disposal doesn't close it.
+  // Explicit provider for every tile layer. This controls the client and,
+  // crucially, disables flutter_map 8's process-wide built-in cache singleton.
+  // That singleton is the one piece of the base-tile path that a tile-epoch
+  // re-key cannot reset, so a bad state in it survives every in-app retry and
+  // clears only on a full restart. Live radar does not need cross-session tile
+  // caching anyway. It is cheap to build on every rebuild, because the client
+  // is injected: no client is created, and layer disposal does not close it.
   //
   // RekeySafeTileProvider handles the *other* process-wide cache in the tile
-  // path - Flutter's own image cache - where a re-key would otherwise leave
+  // path, Flutter's own image cache, where a re-key would otherwise leave
   // every in-flight tile permanently blank. See that file.
   TileProvider _tileProvider() => RekeySafeTileProvider(
     httpClient: httpClient,
@@ -139,8 +141,9 @@ class RadarMapView extends StatelessWidget {
         onPositionChanged: (camera, hasGesture) {
           if (hasGesture) onCameraGesture();
         },
-        // Long-press drops a scouting pin: closures load around it instead
-        // of the GPS fix (tap the pin or the locate FAB to go back).
+        // Long-press drops a scouting pin. Closures then load around the pin
+        // instead of around the GPS fix. Tap the pin or the locate button to
+        // go back.
         onLongPress: (_, latLng) => onLongPress(latLng),
       ),
       children: [
@@ -153,11 +156,11 @@ class RadarMapView extends StatelessWidget {
   }
 
   /// Base-map tile chrome: a pulse while the image is on its way, and a
-  /// visible tappable "broken tile" placeholder when it failed - so blank
-  /// spots are diagnosable (loading vs failed) and recoverable in place.
+  /// visible, tappable 'broken tile' placeholder when it failed. A blank spot
+  /// is then diagnosable, as loading or as failed, and recoverable in place.
   /// The greyscale filter is applied here, per tile, rather than around the
-  /// whole layer: ColorFiltered's saveLayer bounds miss parts of the
-  /// camera-transformed layer, leaving unfiltered strips.
+  /// whole layer. ColorFiltered's saveLayer bounds miss parts of the
+  /// camera-transformed layer, which leaves unfiltered strips.
   Widget _pulsingTile(BuildContext context, Widget tile, TileImage image) {
     if (image.loadError) {
       return GestureDetector(
@@ -190,12 +193,12 @@ class RadarMapView extends StatelessWidget {
     return Stack(fit: StackFit.expand, children: [const TilePulse(), t]);
   }
 
-  /// Prefecture skeleton (below tiles), base map, and the stacked radar
-  /// frames (only the active one visible).
+  /// Prefecture skeleton below the tiles, the base map, and the stacked radar
+  /// frames. Only the active frame is visible.
   List<Widget> _baseAndRadar(JmaFrame? frame) => [
-    // The skeleton sits BELOW the tile layers, so it only shows where
-    // opaque map tiles haven't painted yet (still loading, or unreachable
-    // offline) and disappears as they arrive.
+    // The skeleton sits BELOW the tile layers, so it shows only where opaque
+    // map tiles have not painted yet, either still loading or unreachable
+    // offline. It disappears as those tiles arrive.
     PolylineLayer(polylines: _outline),
     TileLayer(
       key: ValueKey('base-$tileEpoch-${closures.english}'),
@@ -205,23 +208,23 @@ class RadarMapView extends StatelessWidget {
       subdomains: const ['a', 'b', 'c'],
       userAgentPackageName: _userAgent,
       maxNativeZoom: 19,
-      // Fresh instance per layer: these transformers hold per-stream
-      // timer state, so a shared static would cross-wire the layers'
-      // debounce clocks.
+      // A fresh instance per layer. These transformers hold per-stream timer
+      // state, so a shared static would cross-wire the layers' debounce
+      // clocks.
       tileUpdateTransformer: TileUpdateTransformers.debounce(_settleDelay),
       errorTileCallback: (t, e, st) => onTileError('base', t, e, st),
       // Base map only: the radar layers are transparent overlays, where a
       // pulse would paint grey over perfectly loaded map.
       tileBuilder: _pulsingTile,
     ),
-    // All frames stay mounted so their tiles pre-load and the animation
-    // never flickers; only the active frame is visible. A 404 from JMA
-    // means "no rain in this tile" and simply renders as nothing.
+    // All frames stay mounted so that their tiles pre-load and the animation
+    // never flickers. Only the active frame is visible. A 404 from JMA means
+    // 'no rain in this tile' and simply renders as nothing.
     _RadarFrameLayers(view: this, active: frame),
   ];
 
-  /// The loaded GPX track, or (in point mode) the search ring plus its
-  /// loading pulse.
+  /// The loaded GPX track. In point mode, the search ring plus its loading
+  /// pulse instead.
   List<Widget> _searchOverlay() {
     final route = closures.route;
     if (route != null) {
@@ -273,7 +276,7 @@ class RadarMapView extends StatelessWidget {
     ];
   }
 
-  /// Regulated road segments, closure markers, and the rider/pin markers.
+  /// Regulated road segments, closure markers, and the rider and pin markers.
   List<Widget> _closureLayers() {
     final now = DateTime.now();
     final shown = closures.shown;
@@ -312,10 +315,10 @@ class RadarMapView extends StatelessWidget {
           if (rider != null)
             Marker(
               point: rider,
-              // Twice the dot's size: the visible dot stays 22 px (it marks a
-              // position, and a bigger one would claim precision the fix
-              // doesn't have) but a 22 px tap target on a moving bike is not
-              // one, so the transparent surround takes the tap.
+              // Twice the dot's size. The visible dot stays 22 px, because it
+              // marks a position and a bigger one would claim precision the
+              // fix does not have. But a 22 px tap target on a moving bike is
+              // no target at all, so the transparent surround takes the tap.
               width: 44,
               height: 44,
               child: GestureDetector(
@@ -359,12 +362,12 @@ class RadarMapView extends StatelessWidget {
     ];
   }
 
-  /// The mandatory data credits: the standard low-key (i) in the corner,
-  /// opening a *centred* dialog. flutter_map's RichAttributionWidget isn't
-  /// used because its panel expands from the corner it lives in, where it
-  /// slides underneath the FAB stack; a dialog floats clear of everything.
-  /// Styling mirrors its collapsed state (half-opacity info icon, inside
-  /// SafeArea).
+  /// The mandatory data credits: the standard low-key (i) in the corner, which
+  /// opens a *centred* dialogue. flutter_map's RichAttributionWidget is not
+  /// used, because its panel expands from the corner it lives in and slides
+  /// underneath the button stack. A dialogue floats clear of everything. The
+  /// styling mirrors that widget's collapsed state: a half-opacity info icon,
+  /// inside SafeArea.
   Widget _attribution(BuildContext context) => SafeArea(
     child: Align(
       alignment: Alignment.bottomRight,
@@ -395,7 +398,7 @@ class RadarMapView extends StatelessWidget {
       if (closures.english)
         (
           // Esri's terms want the data providers credited, not just the
-          // product - this is their standard string for World Street Map.
+          // product. This is their standard string for World Street Map.
           'Esri - World Street Map. Sources: Esri, TomTom, Garmin, FAO, '
               'NOAA, USGS, © OpenStreetMap contributors, and the GIS User '
               'Community',
@@ -404,8 +407,8 @@ class RadarMapView extends StatelessWidget {
           ),
         )
       else
-        // OSM France donates the tile hosting; their usage policy asks that
-        // the hosting be credited alongside the style.
+        // OSM France donates the tile hosting. Their usage policy asks for
+        // the hosting to be credited alongside the style.
         (
           'CyclOSM · tiles hosted by OpenStreetMap France',
           Uri.parse('https://www.cyclosm.org'),
@@ -441,14 +444,15 @@ class RadarMapView extends StatelessWidget {
 
 /// The stacked radar frame layers, fetching at a *settled* JMA zoom.
 ///
-/// JMA only renders even zooms (odd levels are blank 200s - see
-/// jma_api.dart), so each layer pins its fetch to [jmaNativeZoom] and scales
-/// the tiles to the camera. Changing that level means re-keying the layers,
-/// which refetches every frame's whole grid - so doing it live while a pinch
-/// sweeps z10→z6 fires hundreds of requests for levels the gesture leaves
-/// behind a moment later. The switch instead waits until the zoom has held
-/// still for [RadarMapView._settleDelay]; until then the current grid keeps
-/// rendering, scaled (at most 2× per level - briefly blockier, never blank).
+/// JMA renders only even zooms, because odd levels come back as blank 200s.
+/// See jma_api.dart. Each layer therefore pins its fetch to [jmaNativeZoom]
+/// and scales the tiles to the camera. Changing that level means re-keying the
+/// layers, which refetches every frame's whole grid. Doing that live while a
+/// pinch sweeps z10→z6 would fire hundreds of requests for levels the gesture
+/// leaves behind a moment later. The switch waits instead until the zoom has
+/// held still for [RadarMapView._settleDelay]. Until then the current grid
+/// keeps rendering, scaled by at most 2× per level: briefly blockier, never
+/// blank.
 class _RadarFrameLayers extends StatefulWidget {
   const _RadarFrameLayers({required this.view, required this.active});
 
@@ -460,9 +464,9 @@ class _RadarFrameLayers extends StatefulWidget {
 }
 
 class _RadarFrameLayersState extends State<_RadarFrameLayers> {
-  /// Pace of the staged frame mounting below: the next preload frame joins
-  /// only after the previous one has had this long to drain its grid
-  /// through the per-host connection queue.
+  /// Pace of the staged frame mounting below. The next preload frame joins
+  /// only after the previous one has had this long to drain its grid through
+  /// the per-host connection queue.
   static const _preloadInterval = Duration(milliseconds: 1500);
 
   int? _native; // level the layers are keyed to (null until first build)
@@ -470,14 +474,14 @@ class _RadarFrameLayersState extends State<_RadarFrameLayers> {
   Timer? _settle;
 
   // Staged mounting state: which frames are mounted in the current
-  // generation (a generation = one epoch + level + frame-set combination).
+  // generation. A generation is one combination of epoch, level and frame set.
   final _mountedFrames = <String>{};
   String _generation = '';
   Timer? _preload;
-  // The settle clock ran out; the next build applies the level the camera
-  // is *then* on. The timer deliberately doesn't carry a level itself: if
-  // the camera slips back across the boundary just as the clock fires, a
-  // captured value would re-key to a level the camera already left.
+  // The settle clock ran out, so the next build applies the level the camera
+  // is *then* on. The timer deliberately carries no level itself. If the
+  // camera slips back across the boundary just as the clock fires, a captured
+  // value would re-key to a level the camera has already left.
   bool _settleElapsed = false;
 
   void _cancelSettle() {
@@ -493,7 +497,8 @@ class _RadarFrameLayersState extends State<_RadarFrameLayers> {
     super.dispose();
   }
 
-  /// Mount the next not-yet-mounted frame; stop the timer once all are in.
+  /// Mount the next frame that is not mounted yet. Stop the timer once every
+  /// frame is in.
   void _mountNextFrame() {
     if (!mounted) return;
     final frames = widget.view.frames;
@@ -518,24 +523,24 @@ class _RadarFrameLayersState extends State<_RadarFrameLayers> {
 
   @override
   Widget build(BuildContext context) {
-    // MapCamera.of registers a dependency: this rebuilds as the camera
-    // moves, so the settle logic below sees every zoom change.
+    // MapCamera.of registers a dependency, so this rebuilds as the camera
+    // moves and the settle logic below sees every zoom change.
     final zoom = MapCamera.of(context).zoom;
     final target = jmaNativeZoom(zoom);
     if (_native == null) {
       _native = target; // first build: nothing to settle from
     } else if (target == _native) {
-      // Back on (or never left) the level already shown - drop any pending
-      // switch from a crossing the gesture reversed out of.
+      // Back on the level already shown, or never left it. Drop any pending
+      // switch from a crossing that the gesture reversed out of.
       _cancelSettle();
     } else if (_settleElapsed) {
-      _native = target; // the zoom held still long enough - switch now
+      _native = target; // the zoom held still long enough, so switch now
       _settleElapsed = false;
     } else if (zoom != _lastZoom || _settle == null) {
-      // Zoom moved toward another level: (re)start the settle clock. A
-      // rebuild *without* a zoom change (a parent setState - the asset
-      // monitor repaints constantly) keeps the pending timer rather than
-      // pushing the switch out forever.
+      // The zoom moved towards another level, so start the settle clock
+      // again. A rebuild *without* a zoom change keeps the pending timer
+      // rather than pushing the switch out forever. Such a rebuild comes from
+      // a parent setState, because the asset monitor repaints constantly.
       _settle?.cancel();
       _settle = Timer(RadarMapView._settleDelay, () {
         _settle = null;
@@ -546,17 +551,17 @@ class _RadarFrameLayersState extends State<_RadarFrameLayers> {
     _lastZoom = zoom;
 
     final v = widget.view;
-    // Staged mounting: a re-key (epoch bump, level switch, new frame set)
-    // makes every mounted frame refetch its whole grid at once - six
-    // frames' worth of tiles racing through the per-host connection queue,
-    // with the *visible* frame's tiles stuck behind five invisible
-    // preloads. Queue wait counts against the request deadline (see
-    // tile_http_client.dart), so at wide viewports that flood timed the
-    // whole radar out. Each generation therefore mounts the active frame
-    // first - rain on screen in seconds - and adds the others one at a
-    // time for flicker-free playback. The set only grows within a
-    // generation, so playback moving the active frame never unmounts (and
-    // never cancels) a layer already fetching.
+    // Staged mounting. A re-key, from an epoch bump, a level switch or a new
+    // frame set, makes every mounted frame refetch its whole grid at once.
+    // That is six frames' worth of tiles racing through the per-host
+    // connection queue, with the *visible* frame's tiles stuck behind five
+    // invisible preloads. Queue wait counts against the request deadline, see
+    // tile_http_client.dart, so at wide viewports that flood timed the whole
+    // radar out. Each generation therefore mounts the active frame first,
+    // which puts rain on screen in seconds, and adds the others one at a time
+    // for flicker-free playback. The set only grows within a generation, so
+    // playback that moves the active frame never unmounts a layer that is
+    // already fetching, and so never cancels one.
     final gen =
         '${v.tileEpoch}-z$_native-'
         '${v.frames.isEmpty ? '' : v.frames.first.urlTemplate}';
@@ -586,11 +591,12 @@ class _RadarFrameLayersState extends State<_RadarFrameLayers> {
                 userAgentPackageName: RadarMapView._userAgent,
                 minNativeZoom: _native!,
                 maxNativeZoom: _native!,
-                // Fresh instance per layer - see the base layer's note.
+                // A fresh instance per layer, see the base layer's note.
                 tileUpdateTransformer: TileUpdateTransformers.debounce(
                   RadarMapView._settleDelay,
                 ),
-                // Rain-free tiles 404 (expected); the monitor filters those.
+                // Rain-free tiles 404, which is expected. The monitor filters
+                // those out.
                 errorTileCallback: (t, e, st) =>
                     v.onTileError('radar', t, e, st),
               ),

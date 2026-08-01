@@ -4,12 +4,13 @@ import 'package:flutter/foundation.dart';
 
 import '../../jma/jma_api.dart';
 
-/// Radar frame state extracted from the screen: the frame list and its
-/// refresh cycle, playback (with the last-frame dwell), the radar error's
-/// linger, and the fast-reconnect backoff after a failed load.
+/// Radar frame state extracted from the screen: the frame list and its refresh
+/// cycle, the playback with its last-frame dwell, the linger on the radar
+/// error, and the fast-reconnect backoff after a failed load.
 ///
-/// Takes a plain loader function (the screen passes `JmaApi.getFrames`) so
-/// tests drive it with a stub and a pumped clock - no HTTP mocking.
+/// It takes a plain loader function, and the screen passes `JmaApi.getFrames`.
+/// Tests can therefore drive it with a stub and a pumped clock, with no HTTP
+/// mocking.
 class RadarFrameController extends ChangeNotifier {
   RadarFrameController({
     required Future<List<JmaFrame>> Function() loadFrames,
@@ -23,16 +24,16 @@ class RadarFrameController extends ChangeNotifier {
 
   final Future<List<JmaFrame>> Function() _loader;
 
-  /// A load succeeded - connectivity is provably back. The screen heals the
-  /// ConnectivityMonitor (re-keying tiles if there was an outage).
+  /// A load succeeded, so connectivity is provably back. The screen heals the
+  /// ConnectivityMonitor, which re-keys the tiles if there was an outage.
   final VoidCallback onLoaded;
 
-  /// The frame *set* changed, so the radar layers are about to be rebuilt.
-  /// The screen resets its per-tile bookkeeping - stale failure entries
-  /// would otherwise keep the failed-tiles banner up forever.
+  /// The frame *set* changed, so the radar layers are about to be rebuilt. The
+  /// screen resets its per-tile bookkeeping. Stale failure entries would
+  /// otherwise keep the failed-tiles banner up forever.
   final VoidCallback onFramesReplaced;
 
-  /// A backoff retry fired; the screen refreshes closures alongside.
+  /// A backoff retry fired, and the screen refreshes the closures alongside.
   final VoidCallback? onReconnect;
 
   final Duration frameTick;
@@ -41,8 +42,9 @@ class RadarFrameController extends ChangeNotifier {
   /// A transient radar error banner auto-hides after this.
   final Duration errorLinger;
 
-  /// Retry delays after consecutive failed loads, so radar recovers within
-  /// seconds of the signal returning - no waiting for the 5-min refresh.
+  /// Retry delays after consecutive failed loads, so that the radar recovers
+  /// within seconds of the signal returning. It does not wait for the 5-minute
+  /// refresh.
   static const reconnectBackoff = [3, 6, 12, 24, 30]; // seconds
 
   List<JmaFrame> _frames = [];
@@ -64,7 +66,7 @@ class RadarFrameController extends ChangeNotifier {
   int get reconnectAttempt => _reconnectAttempt;
   JmaFrame? get activeFrame => _frames.isEmpty ? null : _frames[_frameIndex];
 
-  /// Kick the first load and start the playback + refresh timers.
+  /// Start the first load, and start the playback and refresh timers.
   void start() {
     load();
     _playTimer = Timer.periodic(frameTick, (_) => tick());
@@ -83,15 +85,15 @@ class RadarFrameController extends ChangeNotifier {
       _radarError = null;
       notifyListeners();
       _errorTimer?.cancel();
-      // Loaded cleanly: stop the fast-reconnect loop.
+      // Loaded cleanly, so stop the fast-reconnect loop.
       _reconnectTimer?.cancel();
       _reconnectAttempt = 0;
       onLoaded();
       if (replaced) onFramesReplaced();
     } catch (e) {
       if (_disposed) return;
-      // Keep showing stale frames if we have them; only surface the error
-      // when there's nothing on screen at all.
+      // Keep showing stale frames where there are any. Surface the error only
+      // when there is nothing on screen at all.
       _radarError = _frames.isEmpty ? '$e' : null;
       notifyListeners();
       _errorTimer?.cancel();
@@ -106,12 +108,12 @@ class RadarFrameController extends ChangeNotifier {
     }
   }
 
-  /// One playback step; driven by [start]'s periodic timer, public so tests
-  /// can step playback without waiting on wall-clock ticks.
+  /// One playback step, driven by the periodic timer in [start]. It is public
+  /// so that tests can step playback without waiting on wall-clock ticks.
   void tick() {
     if (!_playing || _frames.length < 2) return;
-    // Hold the last (+60 min) frame for two ticks so the loop visibly ends
-    // before wrapping back to the past.
+    // Hold the last frame, at +60 min, for two ticks, so that the loop
+    // visibly ends before it wraps back to the past.
     if (_frameIndex == _frames.length - 1 && _lastFrameDwell < 1) {
       _lastFrameDwell++;
       return;
@@ -133,7 +135,7 @@ class RadarFrameController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Scrubber seek; also pauses playback.
+  /// Scrubber seek. It also pauses playback.
   void seek(int i) {
     _playing = false;
     _frameIndex = i;
