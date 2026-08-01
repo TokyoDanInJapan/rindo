@@ -2,124 +2,141 @@
 
 [![Build APK](https://github.com/TokyoDanInJapan/rindo/actions/workflows/build-apk.yml/badge.svg)](https://github.com/TokyoDanInJapan/rindo/actions/workflows/build-apk.yml)
 
-Touring companion for Japan: JMA rain radar, road closures, and seasonal
-gates on a rider-centred map.
-Flutter (Android now; the iOS scaffold is in place for later).
+Touring companion for Japan: JMA rain radar, road closures and seasonal
+gates on a rider-centred map. Built in Flutter. Android works now, and the
+iOS scaffold is in place for later.
 
-Companion to [garmin-jma-radar](https://github.com/hebberd/garmin-jma-radar) -
-same JMA nowcast, but fetched directly from the phone with no proxy: the
+Rindo is a companion to
+[garmin-jma-radar](https://github.com/hebberd/garmin-jma-radar). It uses the
+same JMA nowcast, but the phone fetches it directly with no proxy. The
 device stacks JMA's transparent radar tiles over an OSM base map itself.
 
 ## Features
 
-- **Rain radar** - JMA 高解像度降水ナウキャスト (high-resolution precipitation
-  nowcast), −15 min…+60 min in 15-minute frames, animated and centred on the
-  rider's GPS position over a CyclOSM cycling base map. Radar tiles are pulled
-  straight from JMA's (undocumented) nowcast endpoints; an empty/404 tile
-  simply means "no rain there". JMA only renders these tiles at even zoom
-  levels up to z10, so the app fetches z10 and lets the map scale it when
-  you zoom in closer (blocky, matching JMA's ~250 m data, but always shown).
-- **Scout another area** - long-press the map to drop a pin: closures load
-  around it instead of the GPS position, a teal ring shows the searched
-  radius (pulsing while it loads), and distances are measured from the pin.
-  Tap the pin or the locate button to return to the rider.
-- **Scout a planned ride (GPX)** - load a `.gpx` track (route FAB); it draws
-  on the map and closures are searched within a **10 km corridor of the
-  route** (union of the per-point searches), so everything on or near your
-  planned ride is highlighted at once. Clear it from the same button.
-- **Road closures within 50 km** - full closures (通行止) from two sources,
-  merged and de-duplicated, drawn as markers + red segment overlays with a
-  detail sheet linking to the authoritative source page:
-  - **JARTIC** (`jartic.or.jp/map` internal GeoJSON) - nationwide incl.
-    prefectural roads, 5-minute updates.
-  - **MLIT 道路情報提供システム** (`road-info-prvs.mlit.go.jp`) - national
-    highways (直轄国道) incl. winter closures (冬期通行止), with regulation
-    periods.
-- **English / Japanese toggle** (EN by default) - English mode swaps the
-  base map for Esri's English-labelled World Street Map and machine-
-  translates closure text on device with Google ML Kit (the ja/en models
-  download once, ~30 MB each, then work offline); Japanese mode shows the
-  sources verbatim over CyclOSM. Translation failures degrade to the
-  original Japanese.
-- **Graceful loading/offline** - base-map tiles pulse softly while they
-  download, and a baked-in outline of Japan + prefecture borders (generated
-  from GeoJSON by `tool/prep_japan_outline.dart`) shows beneath the tiles,
-  so a slow or dead connection leaves a usable skeleton instead of a grey
-  void. Tiles that *fail* (server errors, timeouts) render a visible
-  broken-tile placeholder - tap it, or the "N tiles failed - tap to
-  retry" banner, to refetch; an offline banner covers socket-level
-  outages, and failed tiles also retry on ↻ or automatically once the
-  network returns.
-- **Landslide alerts (土砂災害警戒情報)** - JMA's municipality-level
-  landslide warnings (issued jointly with prefectures) shown as amber
-  markers at the municipality office within the search area. They usually
-  precede the actual road closures by hours. Regenerate the municipality
-  coordinate table with `tool/prep_municipalities.dart` after big mergers.
-- **Weather report** - tap the rider dot (or a dropped pin) for JMA's area
-  forecast where you're standing, laid out as JMA's own page lays it out: a
-  near-term table (icon and temperatures per day, rain chance in fixed
-  00-06/06-12/12-18/18-24 blocks) and the 週間予報 week-ahead table (weather,
-  rain chance, high/low and JMA's own A/B/C confidence grade), with JMA's
-  wording and prose outlook below and any warning headline on top. Weather
-  icons come from JMA's 3-digit 天気コード, bucketed by its leading digit
-  (1 晴れ, 2 くもり, 3 雨, 4 雪) - JMA publishes ~130 codes but no
-  machine-readable table for them, so the icon stays coarse on purpose and the
-  wording beside it carries the detail. The radar says what the rain is doing
-  in the next hour; this says whether to set off at all. Forecasts are
-  keyed by JMA area code rather than coordinates, so a position is resolved
-  through the nearest municipality to its class10 subdivision (千葉県北東部,
-  not just "Chiba") - regenerate that table with
-  `tool/prep_forecast_areas.dart` if JMA reorganises its forecast areas. In
-  English mode the report translates on device like the closures do, except
-  for place names, which use JMA's own English ("North-eastern Region",
-  "Sapporo City") - machine translation is at its worst exactly where JMA is
-  already authoritative. The Japanese shows immediately and the English swaps
-  in behind it, so a first-run model download never blocks the forecast.
-- **Seasonal winter gates** - a curated, bundled dataset of annual mountain-
-  pass closures (渋峠, 麦草峠, 金精峠, 乗鞍 …) with nominal open/close dates,
-  drawn as indigo snowflake markers plus the full closed road section
-  (geometry baked from OSM by `tool/fetch_gate_lines.dart`) while
-  *scheduled*, so tours can be planned around them; live feeds confirm when
-  a gate is actually closed.
+- **Rain radar** – JMA 高解像度降水ナウキャスト (high-resolution precipitation
+  nowcast), from −15 min to +60 min in 15-minute frames. The animation is
+  centred on the rider's GPS position over a CyclOSM cycling base map. The
+  app pulls the radar tiles straight from JMA's undocumented nowcast
+  endpoints. An empty or 404 tile simply means 'no rain there'. JMA renders
+  these tiles only at even zoom levels up to z10, so the app fetches z10 and
+  lets the map scale it as you zoom in closer. The result is blocky, and it
+  matches JMA's roughly 250 m data, but it is always shown.
+- **Scout another area** – long-press the map to drop a pin. Closures then
+  load around the pin instead of around the GPS position, and distances are
+  measured from the pin. A teal ring shows the searched radius, and pulses
+  while the search runs. Tap the pin or the locate button to return to the
+  rider.
+- **Scout a planned ride (GPX)** – load a `.gpx` track with the route
+  button. The track draws on the map, and the app searches for closures
+  within a **10 km corridor of the route** (the union of the per-point
+  searches). Everything on or near your planned ride is highlighted at once.
+  Clear the track from the same button.
+- **Road closures within 50 km** – full closures (通行止) from two sources,
+  merged and de-duplicated. The app draws them as markers and red segment
+  overlays. A detail sheet links to the authoritative source page.
+  - **JARTIC** (`jartic.or.jp/map` internal GeoJSON) – nationwide, including
+    the prefectural roads, updated every 5 minutes.
+  - **MLIT 道路情報提供システム** (`road-info-prvs.mlit.go.jp`) – national
+    highways (直轄国道), including winter closures (冬期通行止), with
+    regulation periods.
+- **English and Japanese toggle** (English by default) – English mode swaps
+  the base map for Esri's English-labelled World Street Map. It also
+  translates the closure text on the device with Google ML Kit. The Japanese
+  and English models download once, about 30 MB each, then work offline.
+  Japanese mode shows the sources word for word over CyclOSM. If a
+  translation fails, the app falls back to the original Japanese.
+- **Graceful loading and offline use** – base-map tiles pulse softly while
+  they download. Beneath the tiles sits a baked-in outline of Japan and the
+  prefecture borders, generated from GeoJSON by
+  `tool/prep_japan_outline.dart`. A slow or dead connection therefore leaves
+  a usable skeleton instead of a grey void. Tiles that *fail*, through
+  server errors or timeouts, draw a visible broken-tile placeholder. Tap the
+  placeholder to fetch it again, or tap the retry banner that counts the
+  failed tiles. Failed tiles also retry when you press ↻, and automatically
+  once the network returns. A separate offline banner covers socket-level
+  outages.
+- **Landslide alerts (土砂災害警戒情報)** – JMA issues these
+  municipality-level landslide warnings jointly with the prefectures. The
+  app shows them as amber markers at the municipality office inside the
+  search area. The warnings usually come hours before the road closures
+  themselves. After a large round of municipal mergers, regenerate the
+  municipality coordinate table with `tool/prep_municipalities.dart`.
+- **Weather report** – tap the rider dot, or a dropped pin, for JMA's area
+  forecast for that spot. The radar says what the rain will do in the next
+  hour. This says whether to set off at all. The sheet follows the layout of
+  JMA's own page:
+  - a near-term table, with an icon and the temperatures for each day, and
+    the rain chance in fixed 00-06, 06-12, 12-18 and 18-24 blocks
+  - the 週間予報 week-ahead table, with the weather, the rain chance, the
+    high and low, and JMA's own A/B/C confidence grade
+  - JMA's wording and prose outlook below the tables, and any warning
+    headline on top
 
-The base map renders **greyscale by default** (like JMA's own nowcast page)
-so radar and closure colours stand out; a palette button flips to full
-colour.
+  Weather icons come from JMA's 3-digit 天気コード, bucketed by the leading
+  digit (1 晴れ, 2 くもり, 3 雨, 4 雪). JMA publishes about 130 codes, but no
+  machine-readable table for them. The icon is therefore coarse on purpose,
+  and the wording beside it carries the detail.
+
+  JMA keys its forecasts by area code, not by coordinates. The app resolves
+  a position through the nearest municipality to its class10 subdivision
+  (千葉県北東部, not just 'Chiba'). If JMA reorganises its forecast areas,
+  regenerate that table with `tool/prep_forecast_areas.dart`.
+
+  In English mode the report translates on the device, as the closures do.
+  Place names are the exception. They use JMA's own English, such as
+  'North-eastern Region' and 'Sapporo City', because machine translation is
+  at its worst exactly where JMA is already authoritative. The Japanese
+  shows immediately and the English swaps in behind it, so a first-run model
+  download never blocks the forecast.
+- **Seasonal winter gates** – a curated, bundled dataset of the annual
+  mountain-pass closures (渋峠, 麦草峠, 金精峠, 乗鞍 …) with their nominal
+  open and close dates. While a closure is *scheduled*, the app draws an
+  indigo snowflake marker plus the whole closed road section, so you can
+  plan a tour around it. `tool/fetch_gate_lines.dart` bakes that geometry
+  from OSM. The live feeds confirm when a gate is actually closed.
+
+The base map renders in **greyscale by default**, like JMA's own nowcast
+page, so the radar and closure colours stand out. A palette button flips it
+to full colour.
 
 ## Layout
 
-- `lib/jma/jma_api.dart` - JMA targetTimes/tile client (port of the proxy's
-  `jma.js`; the only file to touch when JMA changes something)
-- `lib/jma/jma_forecast.dart` - JMA area-forecast client behind the weather
-  sheet, plus the generated position → forecast-area table
+- `lib/jma/jma_api.dart` – JMA targetTimes and tile client, ported from the
+  proxy's `jma.js`. This is the only file to touch when JMA changes
+  something.
+- `lib/jma/jma_forecast.dart` – JMA area-forecast client behind the weather
+  sheet, plus the generated table that maps a position to a forecast area
   (`forecast_areas.g.dart`)
-- `lib/closures/` - closure model, JARTIC + MLIT sources, curated seasonal
-  winter-gate dataset (`seasonal_gates.dart`, update once a year from the
-  prefecture notices) with baked OSM road geometry
-  (`seasonal_gate_lines.g.dart`, generated), merging repository, generated
-  prefecture bbox/bureau table
-- `lib/map/japan_outline.g.dart` - generated prefecture-boundary skeleton
+- `lib/closures/` – closure model, JARTIC and MLIT sources, and the curated
+  seasonal winter-gate dataset (`seasonal_gates.dart`, updated once a year
+  from the prefecture notices) with baked OSM road geometry
+  (`seasonal_gate_lines.g.dart`, generated). Also holds the merging
+  repository and the generated table of prefecture bounding boxes and
+  bureaux.
+- `lib/map/japan_outline.g.dart` – generated prefecture-boundary skeleton,
   drawn beneath the tiles
-- `lib/screens/radar_map_screen.dart` - the map screen's state + layer
-  stack; its widgets (frame controls, legend, closure sheets/styling, tile
-  pulse) live in `lib/screens/radar_map/`
-- `test/` - unit tests; `test/fixtures/` are real captured API responses
+- `lib/screens/radar_map_screen.dart` – the map screen's state and layer
+  stack. Its widgets (frame controls, legend, closure sheets and styling,
+  tile pulse) live in `lib/screens/radar_map/`.
+- `test/` – unit tests. The files in `test/fixtures/` are real captured API
+  responses.
 - `tool/`
-  - `run.sh` - boot the emulator (if needed) + `flutter run`
-  - `deploy.sh` - build + install the release APK on a USB-connected phone
-  - `live_check.dart` - network smoke test:
+  - `run.sh` – boot the emulator (if needed), then `flutter run`
+  - `deploy.sh` – build the release APK and install it on a USB-connected
+    phone
+  - `live_check.dart` – network smoke test:
     `dart run tool/live_check.dart 35.45 139.55`
-  - `fetch_gate_lines.dart` - regenerate seasonal-gate road geometry from
-    OSM Overpass (run when a gate is added)
-  - `prep_japan_outline.dart` - regenerate the prefecture skeleton from a
-    prefectures GeoJSON (not checked in; pass its path)
+  - `fetch_gate_lines.dart` – regenerate the seasonal-gate road geometry
+    from OSM Overpass. Run it when you add a gate.
+  - `prep_japan_outline.dart` – regenerate the prefecture skeleton from a
+    prefectures GeoJSON. That file is not checked in, so pass its path.
 
 ## Setup
 
 ### 1. Install Android Studio (Linux)
 
-Download the tarball from <https://developer.android.com/studio> and extract
-it (e.g. to `~/.android-studio`), then launch it:
+Download the tarball from <https://developer.android.com/studio>. Extract
+it, for example to `~/.android-studio`, then launch it:
 
 ```sh
 tar -xzf android-studio-*-linux.tar.gz -C ~
@@ -127,10 +144,10 @@ mv ~/android-studio ~/.android-studio
 ~/.android-studio/bin/studio      # add ~/.android-studio/bin to PATH for `studio`
 ```
 
-The first-run wizard installs the Android SDK to `~/Android/Sdk`
-(platform-tools, a platform, build-tools and the emulator). Android Studio
-also bundles a JDK at `~/.android-studio/jbr` - no separate Java install is
-needed:
+The first-run wizard installs the Android SDK to `~/Android/Sdk`. That
+includes the platform tools, a platform, the build tools and the emulator.
+Android Studio also bundles a JDK at `~/.android-studio/jbr`, so you do not
+need a separate Java installation:
 
 ```sh
 export ANDROID_HOME=~/Android/Sdk
@@ -148,8 +165,8 @@ flutter doctor                    # everything under "Android" should be green
 
 ### 3. Create an emulator (AVD)
 
-Either in Android Studio via **Device Manager → Create Virtual Device**, or on
-the command line:
+Use Android Studio: **Device Manager → Create Virtual Device**. Or use the
+command line:
 
 ```sh
 $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
@@ -160,13 +177,14 @@ $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd \
 
 ### 4. Run the app in the emulator
 
-The short way - boots the AVD if needed, then runs the app with hot reload:
+The short way. It boots the AVD if needed, then runs the app with hot
+reload:
 
 ```sh
 tool/run.sh                       # env overrides: ANDROID_HOME, JAVA_HOME, FLUTTER, AVD
 ```
 
-Or manually:
+Or do it by hand:
 
 ```sh
 $ANDROID_HOME/emulator/emulator -avd tourtest &   # or start it from Device Manager
@@ -175,28 +193,28 @@ flutter run                       # picks up the running emulator
 ```
 
 `flutter run` gives hot reload (`r`) and hot restart (`R`). The emulator's
-default GPS position is Mountain View - set a location in Japan via the
-emulator's **⋯ → Location** panel to see radar and closures
-(e.g. 35.45, 139.55 for Yokohama).
+default GPS position is Mountain View. To see radar and closures, set a
+location in Japan in the emulator's **⋯ → Location** panel. For Yokohama,
+use 35.45, 139.55.
 
-#### Emulator has no network ("Failed host lookup" / "Network is unreachable")
+#### The emulator has no network ('Failed host lookup' or 'Network is unreachable')
 
-Symptom: everything that hits the network fails - radar, closures, the
-translation-model download - with `errno 7` (Failed host lookup) or
-`errno 101` (Network is unreachable), while the *host* has working
+Symptom: everything that touches the network fails – the radar, the closures
+and the translation-model download. You get `errno 7` (Failed host lookup)
+or `errno 101` (Network is unreachable), while the *host* has working
 internet.
 
 This is **not** a DNS problem. The usual cause is a stale **quickboot
-snapshot** that froze Android in a state with no default network. Inside
-the guest, `dumpsys connectivity` shows `Active default network: none`:
-the interface (`eth0`, 10.0.2.15) and its local route are present, but
-there's no default route, so Android's policy routing sends every packet
-to the null `dummy0` interface. Crucially, `-no-snapshot-save` still
-*loads* such a snapshot, so the broken state returns on every boot.
+snapshot** that froze Android in a state with no default network. Inside the
+guest, `dumpsys connectivity` shows `Active default network: none`. The
+interface (`eth0`, 10.0.2.15) and its local route are present, but there is
+no default route. Android's policy routing therefore sends every packet to
+the null `dummy0` interface. Note that `-no-snapshot-save` still *loads*
+such a snapshot, so the broken state returns on every boot.
 
-`tool/run.sh` now boots with **`-no-snapshot`** (a clean cold boot every
-time) plus `-dns-server 8.8.8.8,1.1.1.1`, which avoids this. If you hit it
-on an emulator started another way:
+`tool/run.sh` now boots with **`-no-snapshot`**, a clean cold boot every
+time, plus `-dns-server 8.8.8.8,1.1.1.1`. That avoids the problem. If you
+meet it on an emulator started another way:
 
 ```sh
 # 1. delete the stale snapshot so boots start clean
@@ -209,19 +227,19 @@ adb shell dumpsys connectivity | grep 'Active default network'
 adb shell ping -c1 8.8.8.8
 ```
 
-Related gotcha: if `run.sh` reports *"Emulator did not appear in adb"* but
-a qemu process is running, the adb server is stale - `adb kill-server &&
-adb start-server`, then rerun. (On a host whose GPU driver forces software
-rendering, cold boots are also slower and occasionally flaky to launch;
-just retry.)
+One related trap: if `run.sh` reports *'Emulator did not appear in adb'* but
+a qemu process is running, the adb server is stale. Run `adb kill-server &&
+adb start-server`, then try again. On a host whose GPU driver forces
+software rendering, cold boots are also slower and sometimes fail to launch.
+Just retry.
 
 ### 5. Deploy to a real device
 
-One-time phone setup: **Settings → About phone → tap "Build number" seven
-times** to unlock Developer options, then enable **Developer options → USB
-debugging**. Plug the phone in via USB and accept the "Allow USB debugging?"
-prompt on its screen (`~/Android/Sdk/platform-tools/adb devices` should list
-it as `device`, not `unauthorized`).
+Set the phone up once. Go to **Settings → About phone** and tap **Build
+number** seven times to unlock Developer options. Then turn on **Developer
+options → USB debugging**. Plug the phone in over USB and accept the 'Allow
+USB debugging?' prompt on its screen. `~/Android/Sdk/platform-tools/adb
+devices` must now list the phone as `device`, not `unauthorized`.
 
 Then:
 
@@ -229,11 +247,11 @@ Then:
 tool/deploy.sh                    # builds the release APK, installs + launches it
 ```
 
-With several devices attached, pick one via `DEVICE=<serial> tool/deploy.sh`.
-Release builds are signed with the debug key (fine for a personal device;
-a real keystore is only needed for store distribution). For development
-with hot reload on the phone, use `flutter run` instead - it targets a
-connected phone the same way it targets the emulator.
+If several devices are attached, pick one with `DEVICE=<serial>
+tool/deploy.sh`. These release builds are signed with the debug key. That is
+fine for a personal device, and you only need a real keystore for store
+distribution. To develop with hot reload on the phone, use `flutter run`
+instead. It targets a connected phone the same way it targets the emulator.
 
 ## Build
 
@@ -246,88 +264,97 @@ flutter build apk --debug   # or --release
 ## Release
 
 Release builds are signed with the keystore configured in
-`android/key.properties` (gitignored; falls back to the debug key when the
-file is absent, so `flutter run --release` works anywhere). One-time setup:
+`android/key.properties`, which is gitignored. If that file is absent, the
+build falls back to the debug key, so `flutter run --release` works
+anywhere. Set the keystore up once:
 
 ```sh
 keytool -genkey -v -keystore ~/keystores/rindo-release.jks \
   -keyalg RSA -keysize 2048 -validity 10950 -alias rindo
 # then fill in storeFile/storePassword/keyAlias/keyPassword in
-# android/key.properties. Never commit the keystore or the passwords;
-# losing the keystore means users must uninstall to ever upgrade.
+# android/key.properties. Never commit the keystore or the passwords.
+# If you lose the keystore, users must uninstall the app before they can
+# ever upgrade.
 ```
 
-Per release: bump `version:` in `pubspec.yaml` (the `+N` build number must
-increase or Android refuses the upgrade), then:
+For each release, bump `version:` in `pubspec.yaml`. The `+N` build number
+must increase, or Android refuses the upgrade. Then run:
 
 ```sh
 tool/release.sh
 ```
 
-This produces `build/release/rindo-<version>-arm64.apk` (the main download -
-works on virtually every modern phone), `rindo-<version>.apk` (fat APK, any
-device) and a `.sha256` file. Attach them to a GitHub Release and link from
-the site; serving sideloaded APKs needs the MIME type
-`application/vnd.android.package-archive` if self-hosting instead.
+This produces three files:
 
-CI can do the whole release instead: pushing a `v<version>` tag runs
-`.github/workflows/release.yml`, which builds the same signed APKs (the tag
-must match the pubspec version) and attaches them to the GitHub Release.
-It needs two secrets in the `release` environment - `KEYSTORE_BASE64`
+- `build/release/rindo-<version>-arm64.apk` – the main download. It works on
+  almost every modern phone.
+- `rindo-<version>.apk` – a fat APK for any device.
+- a `.sha256` file.
+
+Attach them to a GitHub Release and link to them from the site. If you host
+the APKs yourself instead, serve them with the MIME type
+`application/vnd.android.package-archive`.
+
+CI can do the whole release instead. Push a `v<version>` tag to run
+`.github/workflows/release.yml`. It builds the same signed APKs and attaches
+them to the GitHub Release. The tag must match the pubspec version. The
+workflow needs two secrets in the `release` environment: `KEYSTORE_BASE64`
 (`base64 -w0` of the keystore) and `KEYSTORE_PASSWORD`. `build-apk.yml`
-remains the unsigned CI check for pushes and PRs.
+remains the unsigned CI check for pushes and pull requests.
 
-## License
+## Licence
 
 The **code** in this repository is licensed under the
-[PolyForm Noncommercial License 1.0.0](LICENSE): the source is open to
-read, use, modify, and share for **noncommercial purposes only** - personal
-use, hobby projects, research, education. **Commercial use, including
-selling the app or a derivative, is not permitted.** This also matches the
-terms of the closure data sources (JARTIC in particular limits its data to
-private use).
+[PolyForm Noncommercial License 1.0.0](LICENSE). The source is open to read,
+use, modify and share for **noncommercial purposes only**: personal use,
+hobby projects, research and education. **Commercial use, including selling
+the app or a derivative, is not permitted.** This also matches the terms of
+the closure data sources. JARTIC in particular limits its data to private
+use.
 
-The license covers the code only: data fetched at runtime remains subject
-to its providers' terms, and the bundled/generated datasets listed below
-carry their own upstream terms, which the code license does not override.
+The licence covers the code only. Data fetched at runtime stays subject to
+its providers' terms. The bundled and generated datasets listed below carry
+their own upstream terms, and the code licence does not override them.
 
 ## Data terms
 
-Fetched at runtime (not redistributed by this repo):
+Fetched at runtime, and not redistributed by this repo:
 
-- JMA data: [Public Data License v1.0](https://www.jma.go.jp/jma/en/copyright.html)
-  - attribution + "processed" notice required (shown in the map credits).
-  The app redisplays JMA's own published nowcast and area forecasts; it
-  does not synthesise forecasts of its own (regulated under the Weather
-  Service Act).
-- CyclOSM tiles: hosted by OpenStreetMap France, fair-use; OSM data © OpenStreetMap
-  contributors (ODbL).
-- Esri World Street Map tiles (English mode): attribution shown in the map
-  credits; fine for light personal use, but check Esri's terms before any
-  distribution.
-- JARTIC: terms limit the site/data to private use - fine for a personal
-  tool; **do not distribute the app or its data for commercial purposes** (the
-  code licence is noncommercial for the same reason). The endpoints are
-  undocumented and may change.
+- JMA data:
+  [Public Data License v1.0](https://www.jma.go.jp/jma/en/copyright.html).
+  JMA requires attribution and a 'processed' notice, both shown in the map
+  credits. The app redisplays JMA's own published nowcast and area
+  forecasts. It does not synthesise forecasts of its own, which the Weather
+  Service Act regulates.
+- CyclOSM tiles: hosted by OpenStreetMap France under fair use. The OSM data
+  is © OpenStreetMap contributors (ODbL).
+- Esri World Street Map tiles (English mode): the attribution is shown in
+  the map credits. This is fine for light personal use. Check Esri's terms
+  before you distribute anything.
+- JARTIC: the terms limit the site and its data to private use, which is
+  fine for a personal tool. **Do not distribute the app or its data for
+  commercial purposes.** The code licence is noncommercial for the same
+  reason. The endpoints are undocumented and may change.
 - MLIT 道路情報提供システム: government content, attribution required.
 
-Bundled in the repo (generated data, not covered by the code licence):
+Bundled in the repo. This is generated data, and the code licence does not
+cover it:
 
-- `lib/map/japan_outline.g.dart` - prefecture boundary skeleton derived from
-  Global Map Japan (地球地図日本, © 国土地理院/GSI,
-  <https://www.gsi.go.jp/kankyochiri/gm_jpn.html>) obtained via
-  [dataofjapan/land](https://github.com/dataofjapan/land). Per the
-  distributor's terms: credit the source; commercial use additionally asks
-  for a usage report to GSI.
-- `lib/closures/seasonal_gate_lines.g.dart` - seasonal-gate road geometry
-  extracted from OpenStreetMap via Overpass; © OpenStreetMap contributors,
-  [ODbL](https://opendatacommons.org/licenses/odbl/).
-- `lib/hazards/municipalities.g.dart` - municipality office coordinates from
-  [code4fukui/localgovjp](https://github.com/code4fukui/localgovjp) (CC0;
-  upstream sources GSI and J-LIS).
-- `test/fixtures/` - two API responses captured 2026-07-13 for the unit
+- `lib/map/japan_outline.g.dart` – the prefecture boundary skeleton, derived
+  from Global Map Japan (地球地図日本, © 国土地理院/GSI,
+  <https://www.gsi.go.jp/kankyochiri/gm_jpn.html>) and obtained through
+  [dataofjapan/land](https://github.com/dataofjapan/land). The distributor's
+  terms ask you to credit the source. For commercial use, they also ask for
+  a usage report to GSI.
+- `lib/closures/seasonal_gate_lines.g.dart` – seasonal-gate road geometry
+  extracted from OpenStreetMap through Overpass. © OpenStreetMap
+  contributors, [ODbL](https://opendatacommons.org/licenses/odbl/).
+- `lib/hazards/municipalities.g.dart` – municipality office coordinates from
+  [code4fukui/localgovjp](https://github.com/code4fukui/localgovjp) (CC0).
+  The upstream sources are GSI and J-LIS.
+- `test/fixtures/` – two API responses captured on 13 July 2026 for the unit
   tests: `r13.json` (JARTIC closure GeoJSON) and `tuko83.json` (MLIT 通行止
-  data). They remain the property of their services and are included solely
-  as test fixtures.
+  data). They remain the property of their services, and they are included
+  only as test fixtures.
 - The curated seasonal-gate list (`lib/closures/seasonal_gates.dart`) is
   hand-compiled from public prefecture road notices.
