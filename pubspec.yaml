@@ -15,7 +15,7 @@ dependencies:
   google_mlkit_translation: ^0.14.0
   http: ^1.6.0
   latlong2: ^0.10.1
-  meta: ^1.18.0
+  meta: ^1.19.0
   shared_preferences: ^2.5.3
   url_launcher: ^6.3.2
   xml: ^7.0.1
