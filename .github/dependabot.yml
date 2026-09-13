@@ -6,6 +6,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # The Flutter SDK pins meta through flutter_test. A newer meta cannot
+    # resolve until we move to a Flutter release that ships it.
+    ignore:
+      - dependency-name: meta
   - package-ecosystem: gradle
     directory: /android
     schedule:
