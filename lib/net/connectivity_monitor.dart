@@ -67,14 +67,13 @@ class ConnectivityMonitor extends ChangeNotifier {
   /// ignored here. They are the tile-status monitor's business, not
   /// connectivity's.
   void recordTileError(Object error) {
-    final raw = '$error';
     // Deadline timeouts are congestion, not lost connectivity. A saturated
     // per-host queue times tiles out while other requests on the same host
     // succeed, and a real outage surfaces as SocketExceptions anyway.
     // Counting them armed heal(), whose re-key then cancelled the very queue
     // that was slowly draining. That was a self-sustaining refetch storm.
-    if (raw.contains('TimeoutException')) return;
-    if (!looksLikeConnectivityError(raw)) return;
+    if (isTimeout(error)) return;
+    if (!isConnectivityError(error)) return;
     final now = _now();
     _recentNetErrors
       ..add(now)

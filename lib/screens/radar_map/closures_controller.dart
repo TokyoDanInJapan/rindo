@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../closures/closure_repository.dart';
 import '../../closures/road_closure.dart';
-import '../../translate/closure_translator.dart';
+import '../../closures/search_area.dart';
+import '../../translate/ja_en_translator.dart';
 import '../../translate/translation_controller.dart';
 
 /// Owns 'which closures, where': the search area, the fetch and its
@@ -17,19 +20,45 @@ class ClosuresController extends ChangeNotifier {
   static const pointRadiusKm = 50.0; // circle around rider/pin
   static const routeRadiusKm = 10.0; // corridor around a GPX route
 
+  /// How long a clean fetch stays fresh, and how far the centre may move
+  /// before it is refetched anyway.
+  static const freshFor = Duration(minutes: 15);
+  static const refetchAfterKm = 10.0;
+
+  /// How soon a fetch with a failed source is tried again. Its data is partly
+  /// the last data received, so it must not count as fresh for the full
+  /// [freshFor]. This is also the floor that stops a GPS fix every few
+  /// seconds from refetching over a dead network. Each further partial fetch
+  /// in a row doubles the wait, up to [freshFor], so a feed that stays down
+  /// is not polled every 30 seconds for the whole ride.
+  static const retryPartialAfter = Duration(seconds: 30);
+
   final ClosureRepository _repo;
 
   /// Language, translated copies and the model-download lifecycle.
   final TranslationController translation;
 
   /// Ring pulse played while a fetch is in flight. It is driven here, and the
-  /// map's FadeTransition listens to it directly.
+  /// map's FadeTransition listens to [pulseOpacity].
   final AnimationController pulse;
+
+  // Built once. A CurvedAnimation subscribes to its parent when it is made,
+  // so building one per map rebuild leaked a listener on [pulse] each time.
+  late final _pulseCurve = CurvedAnimation(
+    parent: pulse,
+    curve: Curves.easeInOut,
+  );
+
+  /// The search disc's opacity while a fetch is in flight.
+  late final Animation<double> pulseOpacity = Tween(
+    begin: 0.0,
+    end: 0.15,
+  ).animate(_pulseCurve);
 
   ClosuresController({
     required TickerProvider vsync,
     ClosureRepository? repository,
-    ClosureTranslator? translator,
+    JaEnTranslator? translator,
     DateTime Function()? now,
     bool? english,
   }) : _repo = repository ?? ClosureRepository(),
@@ -62,6 +91,12 @@ class ClosuresController extends ChangeNotifier {
   LatLng? _rider;
   LatLng? _pin;
   List<LatLng>? _route;
+  CorridorArea? _corridor; // built once per route, see [CorridorArea]
+
+  // Bumped whenever the search changes shape: a pin dropped or cleared, a
+  // route loaded or cleared. A fetch that finishes under an older generation
+  // answered a question nobody is asking any more, so it is dropped.
+  int _areaGeneration = 0;
 
   LatLng? get rider => _rider;
   LatLng? get pin => _pin;
@@ -85,6 +120,12 @@ class ClosuresController extends ChangeNotifier {
   String? _error;
   LatLng? _fetchedAt;
   DateTime? _fetchedTime;
+  // Partial fetches in a row, for the retry backoff. 0 after a clean one.
+  int _partialStreak = 0;
+
+  // A refresh asked for while a fetch was in flight: null for none, else
+  // whether it was forced. It runs as soon as that fetch ends.
+  bool? _queuedForce;
 
   bool get loading => _loading;
   String? get error => _error;
@@ -99,7 +140,7 @@ class ClosuresController extends ChangeNotifier {
   TranslatorStatus get translatorStatus => translation.translatorStatus;
   String? get translatorError => translation.translatorError;
   DateTime? get downloadStartedAt => translation.downloadStartedAt;
-  ClosureTranslator get translator => translation.translator;
+  JaEnTranslator get translator => translation.translator;
   void toggleLanguage() => translation.toggleLanguage();
 
   // ---- mutations
@@ -116,6 +157,7 @@ class ClosuresController extends ChangeNotifier {
 
   void dropPin(LatLng where) {
     _pin = where;
+    _areaGeneration++;
     _notify();
     refresh(force: true);
   }
@@ -123,13 +165,16 @@ class ClosuresController extends ChangeNotifier {
   void clearPin() {
     if (_pin == null) return;
     _pin = null;
+    _areaGeneration++;
     _notify();
     refresh(force: true);
   }
 
   void loadRoute(List<LatLng> points) {
     _route = points;
+    _corridor = CorridorArea(points, routeRadiusKm);
     _pin = null; // the route owns the search now
+    _areaGeneration++;
     _notify();
     refresh(force: true);
   }
@@ -137,6 +182,8 @@ class ClosuresController extends ChangeNotifier {
   void clearRoute() {
     if (_route == null) return;
     _route = null;
+    _corridor = null;
+    _areaGeneration++;
     _notify();
     refresh(force: true);
   }
@@ -155,39 +202,58 @@ class ClosuresController extends ChangeNotifier {
   }
 
   /// Refetch when nothing was ever fetched, when the centre moved more than
-  /// 10 km from the last fetch, or when the data is older than 15 minutes. A
-  /// loaded route replaces the point query with its corridor, where only age
-  /// and force apply, because the route is static.
+  /// [refetchAfterKm] from the last fetch, or when the data is older than
+  /// [freshFor]. A fetch where a source failed is fresh only for
+  /// [retryPartialAfter]. A loaded route replaces the point query with its
+  /// corridor, where only age and force apply, because the route is static.
+  ///
+  /// A refresh asked for mid-fetch is queued, not dropped. A pin dropped while
+  /// the rider's closures were loading must still load the pin's.
   Future<void> refresh({required bool force}) async {
-    final route = _route;
+    if (_disposed) return;
+    final corridor = _corridor;
     final center = searchCenter;
-    if ((route == null && center == null) || _loading) return;
-    final movedKm = route != null || _fetchedAt == null
+    if (corridor == null && center == null) return;
+    if (_loading) {
+      _queuedForce = (_queuedForce ?? false) || force;
+      return;
+    }
+    final movedKm = corridor != null || _fetchedAt == null
         ? double.infinity
         : const Distance().as(LengthUnit.Kilometer, _fetchedAt!, center!);
     final age = _fetchedTime == null
         ? const Duration(days: 1)
         : _now().difference(_fetchedTime!);
-    if (!force && movedKm < 10 && age < const Duration(minutes: 15)) return;
+    final freshness = _partialStreak == 0
+        ? freshFor
+        // Capped shift: 30 s × 2⁶ is already past [freshFor].
+        : _min(
+            retryPartialAfter * (1 << (_partialStreak - 1).clamp(0, 6)),
+            freshFor,
+          );
+    if (!force && movedKm < refetchAfterKm && age < freshness) return;
 
+    final generation = _areaGeneration;
     _loading = true;
     _error = null;
     _notify();
     // The pulsing disc renders only in point mode, so do not run a ticker for
     // an animation that nothing shows.
-    if (route == null) pulse.repeat(reverse: true);
+    if (corridor == null) unawaited(pulse.repeat(reverse: true));
     try {
-      final (all, errors) = route != null
-          ? await _repo.fetchAlong(route, routeRadiusKm)
-          : await _repo.fetchNear(center!, pointRadiusKm);
-      if (center != null) {
-        all.sort(
-          (a, b) =>
-              a.distanceKmFrom(center).compareTo(b.distanceKmFrom(center)),
-        );
+      final (all, errors) = await _repo.fetch(
+        corridor ?? CircleArea(center!, pointRadiusKm),
+      );
+      // Superseded by a new pin or route: the queued refresh fetches that.
+      if (_disposed || generation != _areaGeneration) return;
+      if (center != null && corridor == null) {
+        // Distances once each, rather than two per comparison.
+        final km = {for (final c in all) c: c.distanceKmFrom(center)};
+        all.sort((a, b) => km[a]!.compareTo(km[b]!));
       }
       _fetchedAt = center;
       _fetchedTime = _now();
+      _partialStreak = errors.isEmpty ? 0 : _partialStreak + 1;
       // Partial-source failures: show what arrived, but say what is missing.
       _error = errors.isEmpty ? null : errors.join('\n');
       // Hand the list over. The originals show immediately, and the English
@@ -206,14 +272,23 @@ class ClosuresController extends ChangeNotifier {
       }
       _loading = false;
       _notify();
+      final queued = _queuedForce;
+      _queuedForce = null;
+      final superseded = generation != _areaGeneration;
+      if (!_disposed && (queued != null || superseded)) {
+        unawaited(refresh(force: superseded || queued!));
+      }
     }
   }
+
+  static Duration _min(Duration a, Duration b) => a < b ? a : b;
 
   @override
   void dispose() {
     _disposed = true;
     translation.removeListener(_notify);
     translation.dispose();
+    _pulseCurve.dispose();
     pulse.dispose();
     super.dispose();
   }

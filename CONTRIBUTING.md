@@ -12,7 +12,9 @@ requests are welcome.
   (JMA, JARTIC and MLIT) set their own terms. JARTIC in particular limits
   its data to private use.
 - **Before you open a pull request**: `flutter analyze` and `flutter test`
-  must both pass. CI runs them on every pull request.
+  must both pass, and the code must be formatted with `dart format`. CI
+  checks all three on every pull request. It does not check the generated
+  `*.g.dart` tables.
 
 To report a bug, give the closure or radar area affected as a rough
 latitude and longitude, and add a screenshot. Both help a lot.

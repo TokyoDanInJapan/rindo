@@ -22,8 +22,7 @@ Future<void> main() async {
     exitCode = 1;
     return;
   }
-  final rows =
-      jsonDecode(await res.transform(utf8.decoder).join()) as List;
+  final rows = jsonDecode(await res.transform(utf8.decoder).join()) as List;
   client.close();
 
   final buf = StringBuffer()
@@ -40,8 +39,10 @@ Future<void> main() async {
     final lat = double.tryParse('${r['lat']}');
     final lon = double.tryParse('${r['lng']}');
     if (lat == null || lon == null) continue;
-    buf.writeln("  '$cid': ('$name', "
-        '${lat.toStringAsFixed(5)}, ${lon.toStringAsFixed(5)}),');
+    buf.writeln(
+      "  '$cid': ('$name', "
+      '${lat.toStringAsFixed(5)}, ${lon.toStringAsFixed(5)}),',
+    );
     n++;
   }
   buf.writeln('};');

@@ -1,6 +1,10 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rindo/net/connectivity_monitor.dart';
+import 'package:rindo/net/net_error.dart';
 
 /// The offline heuristic used to live untested inside the screen; these pin
 /// the burst threshold, the linger aging, dismissal, and the heal path.
@@ -127,5 +131,27 @@ void main() {
       expect(graced.pastStartupGrace, isTrue);
       graced.dispose();
     });
+  });
+
+  test('typed errors classify without relying on their text', () {
+    expect(isConnectivityError(const SocketException('x')), isTrue);
+    expect(isConnectivityError(TimeoutException('x')), isTrue);
+    expect(isTimeout(TimeoutException('x')), isTrue);
+    expect(isConnectivityError(const FormatException('bad png')), isFalse);
+    // The old bare 'Connection' marker matched this header text.
+    expect(looksLikeConnectivityError('Connection: keep-alive'), isFalse);
+    expect(
+      looksLikeConnectivityError(
+        'Connection closed before full header was received',
+      ),
+      isTrue,
+    );
+  });
+
+  test('a typed timeout is congestion, not an outage', () {
+    for (var i = 0; i < 5; i++) {
+      m.recordTileError(TimeoutException('deadline'));
+    }
+    expect(m.isOffline, isFalse);
   });
 }

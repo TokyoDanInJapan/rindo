@@ -3,7 +3,10 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
+import '../closures/feed_result.dart';
 import '../closures/road_closure.dart';
+import '../closures/search_area.dart';
+import '../net/feed_exception.dart';
 import 'municipalities.g.dart';
 
 /// JMA 土砂災害警戒情報 (landslide alerts, issued jointly with prefectures).
@@ -28,17 +31,47 @@ class LandslideSource {
   static const _url =
       'https://www.jma.go.jp/bosai/warning/data/landslide/map.json';
   final http.Client _client;
-  LandslideSource(this._client);
+  final LastGood<void> _lastGood;
 
-  Future<List<RoadClosure>> fetchWhere(bool Function(LatLng) keep) async {
+  LandslideSource(this._client, {DateTime Function()? now})
+    : _lastGood = LastGood(now: now);
+
+  /// Alerts in effect inside [area]. The map is one nationwide file, so a
+  /// failed fetch falls back to the last one read, whatever area it served.
+  Future<FeedResult> fetch(SearchArea area) async {
+    List<RoadClosure>? all;
+    Object? error;
+    try {
+      all = await _fetchAll();
+      _lastGood.put(null, all);
+    } catch (e) {
+      error = e;
+      all = _lastGood.get(null);
+    }
+    return FeedResult(
+      [
+        for (final c in all ?? const <RoadClosure>[])
+          if (area.contains(c.point)) c,
+      ],
+      [
+        if (error != null)
+          all == null ? '$error' : '$error, showing the last data received',
+      ],
+    );
+  }
+
+  /// Every alert in effect nationwide.
+  Future<List<RoadClosure>> _fetchAll() async {
     final r = await _client
         .get(Uri.parse(_url))
         .timeout(const Duration(seconds: 15));
     if (r.statusCode != 200) {
-      throw Exception('landslide map ${r.statusCode}');
+      throw FeedException('JMA landslide', 'map ${r.statusCode}');
     }
     final doc = jsonDecode(utf8.decode(r.bodyBytes));
-    if (doc is! List) return const [];
+    if (doc is! List) {
+      throw FeedException('JMA landslide', 'map: unexpected shape');
+    }
 
     final out = <RoadClosure>[];
     final seen = <String>{};
@@ -48,7 +81,8 @@ class LandslideSource {
       final areaTypes = office['areaTypes'];
       if (areaTypes is! List || areaTypes.isEmpty) continue;
       // The last areaType level is the class20s, the municipalities.
-      final areas = (areaTypes.last as Map)['areas'];
+      final last = areaTypes.last;
+      final areas = last is Map ? last['areas'] : null;
       if (areas is! List) continue;
       for (final a in areas) {
         if (a is! Map || a['warningCode'] != '3') continue;
@@ -58,12 +92,10 @@ class LandslideSource {
         // Skip codes the baked table does not know, from post-merger drift.
         if (m == null || !seen.add(code5)) continue;
         final (name, lat, lon) = m;
-        final point = LatLng(lat, lon);
-        if (!keep(point)) continue;
         out.add(
           RoadClosure(
             id: 'dosha-$code5',
-            point: point,
+            point: LatLng(lat, lon),
             roadName: name,
             restriction: '土砂災害警戒情報',
             cause: '大雨による土砂災害のおそれ（発表 $reported）',

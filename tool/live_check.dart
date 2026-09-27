@@ -16,8 +16,10 @@ Future<void> main(List<String> args) async {
   print('== JMA nowcast frames ==');
   final frames = await JmaApi().getFrames();
   for (final f in frames) {
-    print('  ${f.jstLabel} JST ${f.offsetLabel.padLeft(4)}  '
-        'base=${f.basetime} valid=${f.validtime}');
+    print(
+      '  ${f.jstLabel} JST ${f.offsetLabel.padLeft(4)}  '
+      'base=${f.basetime} valid=${f.validtime}',
+    );
   }
   print('  tile template: ${frames.first.urlTemplate}');
 
@@ -27,12 +29,15 @@ Future<void> main(List<String> args) async {
     print('  SOURCE FAILED: $e');
   }
   closures.sort(
-      (a, b) => a.distanceKmFrom(center).compareTo(b.distanceKmFrom(center)));
+    (a, b) => a.distanceKmFrom(center).compareTo(b.distanceKmFrom(center)),
+  );
   for (final c in closures) {
-    print('  ${c.distanceKmFrom(center).toStringAsFixed(1).padLeft(5)} km  '
-        '${c.roadName} ${c.restriction}'
-        '${c.cause != null ? '（${c.cause}）' : ''}  '
-        '[${c.sourceName}] lines=${c.lines.length}');
+    print(
+      '  ${c.distanceKmFrom(center).toStringAsFixed(1).padLeft(5)} km  '
+      '${c.roadName} ${c.restriction}'
+      '${c.cause != null ? '（${c.cause}）' : ''}  '
+      '[${c.sourceName}] lines=${c.lines.length}',
+    );
     print('         ${c.section ?? ''} -> ${c.sourceUrl}');
   }
   print('${closures.length} closures');

@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
+import '../net/feed_exception.dart';
+
 import '../hazards/municipalities.g.dart';
 import 'forecast_areas.g.dart';
 
@@ -245,11 +247,12 @@ class JmaForecastApi {
   }
 
   /// Fetch the report covering [at]. Throws [JmaForecastException] if the
-  /// position is outside Japan or JMA returns something unusable.
+  /// position is outside Japan ([NoForecastAreaException]) or JMA returns
+  /// something unusable.
   Future<WeatherReport> fetch(LatLng at) async {
     final area = forecastAreaFor(at);
     if (area == null) {
-      throw JmaForecastException('no JMA forecast area covers this position');
+      throw NoForecastAreaException();
     }
     // One round trip each, in parallel: the prose and the structured series
     // live in different files.
@@ -304,8 +307,9 @@ class JmaForecastApi {
       areaName: areaName,
       office: overview['publishingOffice'] as String? ?? '気象庁',
       reportedAt:
-          DateTime.tryParse(overview['reportDatetime'] as String? ?? '')
-              ?.toUtc() ??
+          DateTime.tryParse(
+            overview['reportDatetime'] as String? ?? '',
+          )?.toUtc() ??
           DateTime.now().toUtc(),
       headline: headline.isEmpty ? null : headline,
       overview: _tidy(overview['text'] as String? ?? ''),
@@ -487,9 +491,17 @@ class JmaForecastApi {
 
 /// JMA's forecast endpoints returned something unusable, or the position is
 /// not one they cover.
-class JmaForecastException implements Exception {
-  JmaForecastException(this.message);
-  final String message;
+class JmaForecastException extends FeedException {
+  JmaForecastException(String message) : super('JMA forecast', message);
+
   @override
   String toString() => 'JmaForecastException: $message';
+}
+
+/// The position is outside every JMA forecast area: out at sea, or outside
+/// Japan. Its own type, because the sheet tells the rider something different
+/// for it than for a failed fetch.
+class NoForecastAreaException extends JmaForecastException {
+  NoForecastAreaException()
+    : super('no JMA forecast area covers this position');
 }

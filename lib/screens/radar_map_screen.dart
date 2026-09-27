@@ -4,8 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_file_dialog/flutter_file_dialog.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:http/http.dart' show Client;
+import 'package:http/io_client.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -22,6 +21,7 @@ import 'radar_map/debug_sheet.dart';
 import 'radar_map/disclaimer.dart';
 import 'radar_map/closures_controller.dart';
 import 'radar_map/frame_controls.dart';
+import 'radar_map/location_controller.dart';
 import 'radar_map/map_banners.dart';
 import 'radar_map/map_compass.dart';
 import 'radar_map/map_fab_stack.dart';
@@ -63,8 +63,13 @@ class _RadarMapScreenState extends State<RadarMapScreen>
   late final _tileClient = MonitoredClient(tileHttpClient(), _assets);
 
   // Shared client for the JSON and XML feeds: JMA targetTimes and the closures
-  // sources.
-  late final _apiClient = MonitoredClient(Client(), _assets);
+  // sources. Each fetch has its own deadline, but a deadline only stops the
+  // wait, not the socket. The connect timeout is what actually lets go of a
+  // black-holed connection.
+  late final _apiClient = MonitoredClient(
+    IOClient(HttpClient()..connectionTimeout = const Duration(seconds: 10)),
+    _assets,
+  );
 
   late final _jma = JmaApi(client: _apiClient);
 
@@ -105,14 +110,15 @@ class _RadarMapScreenState extends State<RadarMapScreen>
       _tileStatus.reset();
       _assets.resetRadarFrames();
     },
-    onReconnect: () => _closures.refresh(force: false),
+    onReconnect: () => unawaited(_closures.refresh(force: false)),
   );
+
+  // GPS permission, the position stream, and its recovery on resume.
+  late final LocationController _location = LocationController(onFix: _onFix);
 
   // Camera-follow: on by default, disengaged by a manual pan, a pin or a
   // route.
   bool _follow = true;
-  String? _locationError;
-  StreamSubscription<Position>? _posSub;
 
   // Current map bearing in degrees, where 0 is north-up. It drives the compass
   // button, which appears only when the map is turned off north. It is fed by
@@ -134,6 +140,11 @@ class _RadarMapScreenState extends State<RadarMapScreen>
   // for the per-tile broken placeholders.
   final _tileStatus = TileStatusMonitor();
 
+  // What the frame strip and the banners rebuild on, built once so the
+  // scoped builders below keep their subscriptions across screen rebuilds.
+  late final _frameStripInputs = Listenable.merge([_assets, _radar]);
+  late final _bannerInputs = Listenable.merge([_tileStatus, _radar]);
+
   @override
   void initState() {
     super.initState();
@@ -141,17 +152,18 @@ class _RadarMapScreenState extends State<RadarMapScreen>
     // Repaint on any change to the closures, the translation or the search
     // area.
     _closures.addListener(_onClosuresChanged);
-    // The frames, the index, the epoch and the offline state all drive the map
-    // stack itself, so these repaint the whole screen. The 5 Hz asset chatter
+    // The epoch and the offline state drive the map stack itself, so these
+    // repaint the whole screen. The radar playback, the 5 Hz asset chatter
     // and the per-tile failure counts deliberately do NOT. Their consumers
-    // rebuild themselves through scoped ListenableBuilders in build().
-    _radar.addListener(_repaint);
+    // rebuild themselves: the radar layers listen to the frame controller,
+    // and the rest sit in scoped ListenableBuilders in build().
     _connectivity.addListener(_repaint);
+    _location.addListener(_repaint);
     _mapEvents = _mapController.mapEventStream.listen(
       (e) => _rotation.value = e.camera.rotation,
     );
     _radar.start();
-    _initLocation();
+    unawaited(_location.start());
     // First launch only: the data-limits warning, before the map is usable.
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => showFirstRunDisclaimer(context),
@@ -162,8 +174,8 @@ class _RadarMapScreenState extends State<RadarMapScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _closuresErrorTimer?.cancel();
-    _mapEvents?.cancel();
-    _posSub?.cancel();
+    unawaited(_mapEvents?.cancel());
+    _location.dispose();
     _radar.dispose();
     _connectivity.dispose();
     _rotation.dispose();
@@ -195,46 +207,27 @@ class _RadarMapScreenState extends State<RadarMapScreen>
     setState(() {});
   }
 
+  /// In the background, stop the GPS, the radar playback and its refresh: a
+  /// hidden map is not worth the battery or the data. Back in front, pick all
+  /// of it up again, and retry location if it had failed. 'inactive' alone,
+  /// such as the permission dialogue or the notification shade, changes
+  /// nothing.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _radar.load();
-      _closures.refresh(force: false);
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _radar.resume();
+        unawaited(_location.resume());
+        unawaited(_closures.refresh(force: false));
+      case AppLifecycleState.hidden || AppLifecycleState.paused:
+        _radar.suspend();
+        _location.suspend();
+      case AppLifecycleState.inactive || AppLifecycleState.detached:
+        break;
     }
   }
 
   // ------------------------------------------------------------- location
-
-  Future<void> _initLocation() async {
-    if (!await Geolocator.isLocationServiceEnabled()) {
-      setState(() => _locationError = 'Location services are disabled');
-      return;
-    }
-    var perm = await Geolocator.checkPermission();
-    if (perm == LocationPermission.denied) {
-      perm = await Geolocator.requestPermission();
-    }
-    if (perm == LocationPermission.denied ||
-        perm == LocationPermission.deniedForever) {
-      setState(() => _locationError = 'Location permission denied');
-      return;
-    }
-    setState(() => _locationError = null);
-
-    final last = await Geolocator.getLastKnownPosition();
-    if (last != null) _onFix(LatLng(last.latitude, last.longitude));
-
-    _posSub =
-        Geolocator.getPositionStream(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.high,
-            distanceFilter: 20, // metres between updates
-          ),
-        ).listen(
-          (p) => _onFix(LatLng(p.latitude, p.longitude)),
-          onError: (e) => setState(() => _locationError = '$e'),
-        );
-  }
 
   void _onFix(LatLng fix) {
     final first = _closures.rider == null;
@@ -271,12 +264,15 @@ class _RadarMapScreenState extends State<RadarMapScreen>
       try {
         await file.delete();
       } catch (_) {}
-      final route = parseGpx(content);
+      if (!mounted) return;
+      // Parsed and thinned off the UI isolate, see loadGpx.
+      final route = await loadGpx(content);
+      if (!mounted) return;
       setState(() => _follow = false); // route owns the view now
-      _closures.loadRoute(route);
+      _closures.loadRoute(route.points);
       _mapController.fitCamera(
         CameraFit.coordinates(
-          coordinates: thinRoute(route, 1),
+          coordinates: route.fit,
           padding: const EdgeInsets.fromLTRB(48, 240, 48, 140),
         ),
       );
@@ -325,7 +321,7 @@ class _RadarMapScreenState extends State<RadarMapScreen>
       case MapBanner.radar:
         _radar.dismissError();
       case MapBanner.location:
-        setState(() => _locationError = null);
+        _location.dismissError();
       case MapBanner.closures:
         _closures.dismissError();
     }
@@ -342,8 +338,7 @@ class _RadarMapScreenState extends State<RadarMapScreen>
             mapController: _mapController,
             closures: _closures,
             httpClient: _tileClient,
-            frames: _radar.frames,
-            frameIndex: _radar.frameIndex,
+            radar: _radar,
             tileEpoch: _connectivity.tileEpoch,
             greyscale: _greyscale,
             initialCenter: _closures.rider ?? _fallbackCenter,
@@ -366,11 +361,12 @@ class _RadarMapScreenState extends State<RadarMapScreen>
           SafeArea(
             child: Column(
               children: [
-                // Rebuilds as tile fetches land, for the per-frame load dots.
-                // It is scoped here so that the roughly 5 Hz asset chatter
-                // does not repaint the whole map stack.
+                // Rebuilds as tile fetches land, for the per-frame load dots,
+                // and as playback moves. It is scoped here so that neither the
+                // roughly 5 Hz asset chatter nor the frame ticks repaint the
+                // whole map stack.
                 ListenableBuilder(
-                  listenable: _assets,
+                  listenable: _frameStripInputs,
                   builder: (context, _) => FrameControls(
                     frames: _radar.frames,
                     frameIndex: _radar.frameIndex,
@@ -380,10 +376,10 @@ class _RadarMapScreenState extends State<RadarMapScreen>
                     onSeek: _radar.seek,
                   ),
                 ),
-                // Rebuilds per failed-tile count change, scoped for the same
-                // reason as the frame strip above.
+                // Rebuilds per failed-tile count change and radar error,
+                // scoped for the same reason as the frame strip above.
                 ListenableBuilder(
-                  listenable: _tileStatus,
+                  listenable: _bannerInputs,
                   builder: (context, _) => MapBanners(
                     // Hold the connectivity banners during the cold-start
                     // grace, so that a momentary launch gap does not flash
@@ -401,7 +397,7 @@ class _RadarMapScreenState extends State<RadarMapScreen>
                     radarError: _connectivity.pastStartupGrace
                         ? _radar.radarError
                         : null,
-                    locationError: _locationError,
+                    locationError: _location.error,
                     closuresError: _connectivity.pastStartupGrace
                         ? _closures.error
                         : null,
@@ -444,8 +440,8 @@ class _RadarMapScreenState extends State<RadarMapScreen>
           // Re-key the tile layers too. That retries any tiles that errored,
           // which flutter_map will not do by itself.
           _retryTiles();
-          _radar.load();
-          _closures.refresh(force: true);
+          unawaited(_radar.load());
+          unawaited(_closures.refresh(force: true));
         },
         onRecenter: () {
           _closures.clearPin();
@@ -502,7 +498,7 @@ class _RadarMapScreenState extends State<RadarMapScreen>
       radarNativeZoom: _radarNativeZoom,
       radarError: _radar.radarError,
       hasFix: _closures.rider != null,
-      locationError: _locationError,
+      locationError: _location.error,
       closureCount: _closures.shown.length,
       closuresLoading: _closures.loading,
       closuresError: _closures.error,
@@ -552,7 +548,17 @@ class _RadarMapScreenState extends State<RadarMapScreen>
     onOpenSource: _open,
   );
 
+  /// Open a source page in the browser. With no app to open it, or a
+  /// platform error, say so rather than let the tap do nothing.
   Future<void> _open(Uri url) async {
-    await launchUrl(url, mode: LaunchMode.externalApplication);
+    var opened = false;
+    try {
+      opened = await launchUrl(url, mode: LaunchMode.externalApplication);
+    } catch (_) {}
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not open $url')));
+    }
   }
 }

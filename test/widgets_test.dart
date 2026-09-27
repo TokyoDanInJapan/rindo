@@ -16,11 +16,12 @@ import 'package:rindo/screens/radar_map/map_banners.dart';
 import 'package:rindo/screens/radar_map/map_compass.dart';
 import 'package:rindo/screens/radar_map/map_fab_stack.dart';
 import 'package:rindo/screens/radar_map/model_download_banner.dart';
+import 'package:rindo/screens/radar_map/radar_frame_controller.dart';
 import 'package:rindo/screens/radar_map/radar_legend.dart';
 import 'package:rindo/screens/radar_map/radar_map_view.dart';
 import 'package:rindo/net/tile_status.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:rindo/translate/closure_translator.dart';
+import 'package:rindo/translate/ja_en_translator.dart';
 import 'package:rindo/translate/translation_controller.dart';
 
 /// Widget tests for the dumb presentation widgets: the emulator covers the
@@ -49,33 +50,39 @@ Future<MapController> pumpMap(
   addTearDown(closures.dispose);
   if (rider != null) closures.setRider(rider);
   if (pin != null) closures.dropPin(pin);
+  // Loaded once and never started: no playback or refresh timers.
+  final radar = RadarFrameController(
+    loadFrames: () async => const [
+      JmaFrame(
+        basetime: '20260721110000',
+        validtime: '20260721110000',
+        offsetMin: 0,
+      ),
+      JmaFrame(
+        basetime: '20260721110000',
+        validtime: '20260721111500',
+        offsetMin: 15,
+      ),
+    ],
+    onLoaded: () {},
+    onFramesReplaced: () {},
+  );
+  addTearDown(radar.dispose);
+  await t.runAsync(radar.load);
   await t.pumpWidget(
     MaterialApp(
       home: RadarMapView(
         mapController: controller,
         closures: closures,
         httpClient: MockClient((_) async => http.Response('nf', 404)),
-        frames: const [
-          JmaFrame(
-            basetime: '20260721110000',
-            validtime: '20260721110000',
-            offsetMin: 0,
-          ),
-          JmaFrame(
-            basetime: '20260721110000',
-            validtime: '20260721111500',
-            offsetMin: 15,
-          ),
-        ],
-        frameIndex: 0,
+        radar: radar,
         tileEpoch: 0,
         greyscale: false,
         initialCenter: const LatLng(35, 137),
         initialZoom: 10,
         onCameraGesture: () {},
         onLongPress: (_) {},
-        onShowPlace: (point, {required pinned}) =>
-            places?.add((point, pinned)),
+        onShowPlace: (point, {required pinned}) => places?.add((point, pinned)),
         onShowDetail: (_) {},
         onOpenUrl: (url) => opened?.add(url),
         onTileError: (_, _, _, _) {},
@@ -391,6 +398,22 @@ void main() {
       expect(toggled, 1);
     });
 
+    testWidgets('a single frame cannot be scrubbed past the end', (t) async {
+      await t.pumpWidget(
+        _host(
+          FrameControls(
+            frames: [frames.first],
+            frameIndex: 0,
+            frameStatus: const [FrameLoadState.loaded],
+            playing: false,
+            onPlayPause: () {},
+            onSeek: (_) => fail('one frame has nowhere to seek'),
+          ),
+        ),
+      );
+      expect(t.widget<Slider>(find.byType(Slider)).onChanged, isNull);
+    });
+
     testWidgets('per-frame dots take their load-state colour', (t) async {
       await t.pumpWidget(
         _host(
@@ -462,6 +485,22 @@ void main() {
       m.reset();
       expect(m.hasFailures, isFalse);
       expect(notifications, 3); // add, add, reset
+    });
+
+    test("recognises flutter_map's own 404 by type, whatever its text", () {
+      final m = TileStatusMonitor();
+      m.recordError(
+        'radar',
+        const TileCoordinates(3, 4, 8),
+        NetworkImageLoadException(statusCode: 404, uri: Uri.parse('x:')),
+      );
+      expect(m.failedCount, 0);
+      m.recordError(
+        'base',
+        const TileCoordinates(3, 4, 8),
+        NetworkImageLoadException(statusCode: 500, uri: Uri.parse('x:')),
+      );
+      expect(m.failedCount, 1);
     });
   });
 

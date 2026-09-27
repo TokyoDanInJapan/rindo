@@ -59,8 +59,9 @@ So use this order:
 2. Commit the change to `main`.
 3. Tag `v0.1.1` and push the tag.
 
-A `v*` tag triggers two workflows. **Build APK** produces a debug-signed
-artifact only. **Release** builds the signed APKs with `tool/release.sh` and
-attaches them to a GitHub Release. Release needs `KEYSTORE_BASE64` and
+A `v*` tag triggers only **Release**. It runs the analyser and the tests,
+builds the signed APKs with `tool/release.sh` and attaches them to a GitHub
+Release. **Build APK** runs on pushes to `main` and on pull requests, and
+produces a debug-signed artifact only. Release needs `KEYSTORE_BASE64` and
 `KEYSTORE_PASSWORD` in the repo's `release` *environment*. Repo secrets do
 not work – they resolve to empty strings.

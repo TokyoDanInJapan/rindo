@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:rindo/closures/closure_repository.dart';
+import 'package:rindo/closures/search_area.dart';
 import 'package:rindo/closures/seasonal_gates.dart';
 import 'package:rindo/hazards/landslide_source.dart';
 
@@ -40,7 +41,11 @@ http.Client _client({String body = _fixture, int status = 200}) =>
         return http.Response('{"type":"FeatureCollection","features":[]}', 200);
       }
       if (path.contains('pcTukokisei_')) {
-        return http.Response('no backup path here', 200);
+        // A live data path; its category files 404, which reads as empty.
+        return http.Response(
+          '<script src="../backup/20260713225000/x/init.js">',
+          200,
+        );
       }
       return http.Response('not found', 404);
     });
@@ -49,7 +54,12 @@ const _kusatsu = LatLng(36.62, 138.60);
 
 void main() {
   test("only warningCode '3' municipalities become alerts", () async {
-    final alerts = await LandslideSource(_client()).fetchWhere((_) => true);
+    // A circle wide enough to hold all of Japan.
+    final result = await LandslideSource(
+      _client(),
+    ).fetch(CircleArea(const LatLng(36, 138), 3000));
+    expect(result.problems, isEmpty);
+    final alerts = result.closures;
     expect(alerts, hasLength(1));
     final a = alerts.single;
     expect(a.id, 'dosha-10426');
@@ -61,17 +71,12 @@ void main() {
     expect(a.distanceKmFrom(_kusatsu), lessThan(5));
   });
 
-  test('the keep predicate filters by location', () async {
+  test('the search area filters by location', () async {
     final src = LandslideSource(_client());
-    const dist = Distance();
-    final near = await src.fetchWhere(
-      (p) => dist.as(LengthUnit.Kilometer, _kusatsu, p) <= 50,
-    );
-    expect(near, hasLength(1));
-    final far = await src.fetchWhere(
-      (p) => dist.as(LengthUnit.Kilometer, const LatLng(33, 131), p) <= 50,
-    );
-    expect(far, isEmpty);
+    final near = await src.fetch(CircleArea(_kusatsu, 50));
+    expect(near.closures, hasLength(1));
+    final far = await src.fetch(CircleArea(const LatLng(33, 131), 50));
+    expect(far.closures, isEmpty);
   });
 
   test('repository appends alerts to merged closures near the rider', () async {

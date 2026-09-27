@@ -31,7 +31,9 @@ void showPlaceSheet(
             leading: const Icon(Icons.cloud_outlined),
             title: const Text('Weather here'),
             subtitle: Text(
-              pinned ? 'JMA forecast for the pin' : 'JMA forecast for your spot',
+              pinned
+                  ? 'JMA forecast for the pin'
+                  : 'JMA forecast for your spot',
             ),
             onTap: () {
               Navigator.pop(ctx);
@@ -108,10 +110,7 @@ void showWeatherSheet(
             AsyncSnapshot(connectionState: ConnectionState.waiting) =>
               const _Centred(child: CircularProgressIndicator()),
             AsyncSnapshot(hasError: true, :final error) => _Centred(
-              child: Text(
-                _friendlyError(error!),
-                textAlign: TextAlign.center,
-              ),
+              child: Text(_friendlyError(error!), textAlign: TextAlign.center),
             ),
             AsyncSnapshot(data: final report?) => _MaybeTranslated(
               report: report,
@@ -131,8 +130,7 @@ void showWeatherSheet(
 /// 503' helps nobody. Connectivity and coverage are the two things they can
 /// act on.
 String _friendlyError(Object error) {
-  final raw = '$error';
-  if (raw.contains('no JMA forecast area')) {
+  if (error is NoForecastAreaException) {
     return 'JMA does not publish a forecast for this position, because it '
         'only covers Japan. Move the map, or drop a pin, somewhere inland.';
   }
@@ -287,10 +285,7 @@ class _Report extends StatelessWidget {
         ),
         _Section(
           title: 'Day by day',
-          child: _Wording(
-            days: report.days,
-            label: (d) => _dayLabel(d, today),
-          ),
+          child: _Wording(days: report.days, label: (d) => _dayLabel(d, today)),
         ),
         if (report.week.isNotEmpty)
           _Section(
@@ -391,12 +386,13 @@ int? _popAt(List<RainChance>? day, int hour) {
   return null;
 }
 
-TextStyle? _rainStyle(TextTheme text, int? percent) => text.bodyMedium?.copyWith(
-  fontWeight: (percent ?? 0) >= _notableRain
-      ? FontWeight.bold
-      : FontWeight.normal,
-  color: (percent ?? 0) >= _notableRain ? Colors.blue.shade700 : null,
-);
+TextStyle? _rainStyle(TextTheme text, int? percent) =>
+    text.bodyMedium?.copyWith(
+      fontWeight: (percent ?? 0) >= _notableRain
+          ? FontWeight.bold
+          : FontWeight.normal,
+      color: (percent ?? 0) >= _notableRain ? Colors.blue.shade700 : null,
+    );
 
 Widget _cell(Widget child, {Alignment align = Alignment.center}) => Padding(
   padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 6),
@@ -437,9 +433,7 @@ class _NearTerm extends StatelessWidget {
                 children: [
                   _cell(const SizedBox.shrink()),
                   for (final d in days)
-                    _cell(
-                      Text(label(jstDate(d.at)), style: text.titleSmall),
-                    ),
+                    _cell(Text(label(jstDate(d.at)), style: text.titleSmall)),
                 ],
               ),
               TableRow(
@@ -540,9 +534,10 @@ class _Wording extends StatelessWidget {
           Text(label(jstDate(d.at)), style: text.titleSmall),
           Text(d.weather, style: text.bodyMedium),
           if ([
-            if (d.wind case final w? when w.isNotEmpty) 'Wind: $w',
-            if (d.wave case final w? when w.isNotEmpty) 'Waves: $w',
-          ].join(' · ') case final detail when detail.isNotEmpty)
+                if (d.wind case final w? when w.isNotEmpty) 'Wind: $w',
+                if (d.wave case final w? when w.isNotEmpty) 'Waves: $w',
+              ].join(' · ')
+              case final detail when detail.isNotEmpty)
             Text(detail, style: text.bodySmall),
           if (d != days.last) const SizedBox(height: 10),
         ],

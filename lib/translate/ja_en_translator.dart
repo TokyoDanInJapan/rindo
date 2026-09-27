@@ -2,16 +2,19 @@ import 'package:flutter/foundation.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 
 import '../closures/road_closure.dart';
+import 'restriction_glossary.dart';
 
 /// Where the translator is in its lifecycle, for the UI to narrate.
 enum TranslatorStatus { idle, downloadingModel, ready, failed }
 
-/// On-device ja→en translation of closure text, through Google ML Kit. The
-/// models, about 30 MB each way, download once over the network. Translation
+/// On-device ja→en translation, through Google ML Kit, for the closure text and
+/// the weather report. One instance is shared, because it owns the downloaded
+/// models and the string cache. The models, about 30 MB each way, download
+/// once over the network. Translation
 /// then works fully offline, which matters in the same dead zones the rest of
 /// the app is built for. A failure degrades to the original Japanese and never
 /// blocks.
-class ClosureTranslator {
+class JaEnTranslator {
   final _translator = OnDeviceTranslator(
     sourceLanguage: TranslateLanguage.japanese,
     targetLanguage: TranslateLanguage.english,
@@ -72,7 +75,7 @@ class ClosureTranslator {
     }
     downloadStartedAt = null;
     status.value = _ready ? TranslatorStatus.ready : TranslatorStatus.failed;
-    if (!_ready) debugPrint('ClosureTranslator: $lastError');
+    if (!_ready) debugPrint('JaEnTranslator: $lastError');
     return _ready;
   }
 
@@ -101,7 +104,8 @@ class ClosureTranslator {
       point: c.point,
       roadName: await translateText(c.roadName),
       section: c.section == null ? null : await translateText(c.section!),
-      restriction: await translateText(c.restriction),
+      // Never machine-translated: see restriction_glossary.dart.
+      restriction: await restrictionInEnglish(c.restriction, translateText),
       cause: c.cause == null ? null : await translateText(c.cause!),
       period: c.period == null ? null : await translateText(c.period!),
       sourceName: await translateText(c.sourceName),

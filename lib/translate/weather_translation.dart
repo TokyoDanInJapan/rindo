@@ -1,5 +1,5 @@
 import '../jma/jma_forecast.dart';
-import 'closure_translator.dart';
+import 'ja_en_translator.dart';
 
 /// English display copy of a JMA weather report.
 ///
@@ -9,13 +9,13 @@ import 'closure_translator.dart';
 /// come back as things a rider has to decode. JMA already publishes
 /// 'North-eastern Region' and 'Chiba City' for exactly these codes.
 ///
-/// This never throws and never blocks on a missing model. [ClosureTranslator]
+/// This never throws and never blocks on a missing model. [JaEnTranslator]
 /// degrades each string to its Japanese original, so a model that failed or
 /// was never downloaded yields the report unchanged rather than an error. This
 /// is the same contract the closure list has had.
 Future<WeatherReport> translateReport(
   WeatherReport r,
-  ClosureTranslator translator,
+  JaEnTranslator translator,
 ) async {
   if (!await translator.ensureReady()) return r;
 

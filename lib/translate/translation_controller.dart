@@ -3,7 +3,7 @@ import 'dart:ui' show Locale, PlatformDispatcher;
 import 'package:flutter/foundation.dart';
 
 import '../closures/road_closure.dart';
-import 'closure_translator.dart';
+import 'ja_en_translator.dart';
 
 /// Language and translation state for the closure list, split out of
 /// ClosuresController. It holds which language is active, the English copies
@@ -14,21 +14,23 @@ import 'closure_translator.dart';
 /// source list it was started from is still the current one. Otherwise a slow
 /// translation of an old fetch would overwrite a newer list.
 class TranslationController extends ChangeNotifier {
-  TranslationController({ClosureTranslator? translator, bool? english})
-    : _translator = translator ?? ClosureTranslator(),
+  TranslationController({JaEnTranslator? translator, bool? english})
+    : _translator = translator ?? JaEnTranslator(),
       _english = english ?? prefersEnglish(PlatformDispatcher.instance.locale) {
     // Model download and failure transitions must repaint the banner.
     _translator.status.addListener(_notify);
   }
 
-  final ClosureTranslator _translator;
+  final JaEnTranslator _translator;
 
   // In-flight translations outlive the widget tree on teardown, and notifying
   // after dispose is a debug-mode crash.
   bool _disposed = false;
 
   bool _english;
-  bool _translating = false;
+  // Translations in flight. A fetch or a toggle can start one while another
+  // is running, and the first to finish must not clear the flag for both.
+  int _inFlight = 0;
   List<RoadClosure> _source = const [];
   List<RoadClosure> _translated = const [];
 
@@ -40,7 +42,7 @@ class TranslationController extends ChangeNotifier {
   static bool prefersEnglish(Locale locale) => locale.languageCode != 'ja';
 
   bool get english => _english;
-  bool get translating => _translating;
+  bool get translating => _inFlight > 0;
 
   /// What the map, list and detail views display: the English copies when
   /// English is selected, and the untranslated originals otherwise.
@@ -50,7 +52,7 @@ class TranslationController extends ChangeNotifier {
   /// the weather report. It is shared deliberately. It owns the downloaded
   /// model and the string cache, so a second instance would mean a second
   /// 30 MB download.
-  ClosureTranslator get translator => _translator;
+  JaEnTranslator get translator => _translator;
 
   // Translator pass-throughs for the banner.
   TranslatorStatus get translatorStatus => _translator.status.value;
@@ -80,7 +82,7 @@ class TranslationController extends ChangeNotifier {
   Future<void> _retranslate() async {
     if (!_english || _source.isEmpty) return;
     final raw = _source;
-    _translating = true;
+    _inFlight++;
     _notify();
     try {
       // Run these concurrently. Each closure is about 6 platform-channel
@@ -91,7 +93,7 @@ class TranslationController extends ChangeNotifier {
       _translated = out;
       _notify();
     } finally {
-      _translating = false;
+      _inFlight--;
       _notify();
     }
   }

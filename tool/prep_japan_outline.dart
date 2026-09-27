@@ -14,8 +14,7 @@ import 'dart:io';
 
 import 'thin.dart';
 
-const _defaultSource =
-    '../hebberd.com/tools/data/japan_prefectures.geojson';
+const _defaultSource = '../hebberd.com/tools/data/japan_prefectures.geojson';
 const _minSpacingM = 800.0;
 const _minRingPoints = 6; // after thinning; drops islet specks
 
@@ -60,10 +59,14 @@ void main(List<String> args) {
     ..writeln('const japanOutline = <List<LatLng>>[');
   for (final ring in rings) {
     buf.write('  [');
-    buf.write(ring
-        .map((p) =>
-            'LatLng(${p.$1.toStringAsFixed(4)}, ${p.$2.toStringAsFixed(4)})')
-        .join(', '));
+    buf.write(
+      ring
+          .map(
+            (p) =>
+                'LatLng(${p.$1.toStringAsFixed(4)}, ${p.$2.toStringAsFixed(4)})',
+          )
+          .join(', '),
+    );
     buf.writeln('],');
   }
   buf.writeln('];');
@@ -71,7 +74,8 @@ void main(List<String> args) {
   File('lib/map/japan_outline.g.dart')
     ..parent.createSync(recursive: true)
     ..writeAsStringSync(buf.toString());
-  stdout.writeln('${rings.length} rings, $kept points '
-      '($droppedSpecks specks dropped) -> lib/map/japan_outline.g.dart');
+  stdout.writeln(
+    '${rings.length} rings, $kept points '
+    '($droppedSpecks specks dropped) -> lib/map/japan_outline.g.dart',
+  );
 }
-

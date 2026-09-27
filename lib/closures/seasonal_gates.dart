@@ -1,7 +1,9 @@
 import 'package:latlong2/latlong.dart';
 import 'package:meta/meta.dart';
 
+import 'feed_result.dart';
 import 'road_closure.dart';
+import 'search_area.dart';
 import 'seasonal_gate_lines.g.dart';
 
 /// A curated seasonal, winter closure gate. The live feeds report only what is
@@ -107,8 +109,9 @@ const seasonalGates = <SeasonalGate>[
   ),
 ];
 
-/// Bundled-data source with the same `fetchNear` shape as the live sources,
-/// so the repository treats all three alike. Never touches the network.
+/// Bundled-data source with the same `fetch` shape as the live sources, so
+/// the repository treats them all alike. Never touches the network, so it
+/// never reports a problem.
 class SeasonalGateSource {
   final List<SeasonalGate> _gates;
   final DateTime Function() _now;
@@ -117,16 +120,13 @@ class SeasonalGateSource {
     : _gates = gates ?? seasonalGates,
       _now = now ?? DateTime.now;
 
-  Future<List<RoadClosure>> fetchNear(LatLng center, double radiusKm) =>
-      fetchWhere((c) => c.distanceKmFrom(center) <= radiusKm);
-
-  /// Gates whose materialised closure passes [keep].
-  Future<List<RoadClosure>> fetchWhere(bool Function(RoadClosure) keep) async {
+  /// Gates whose point is inside [area].
+  Future<FeedResult> fetch(SearchArea area) async {
     final now = _now();
-    return [
+    return FeedResult([
       for (final g in _gates)
-        if (_toClosure(g, now) case final c when keep(c)) c,
-    ];
+        if (area.contains(LatLng(g.lat, g.lon))) _toClosure(g, now),
+    ]);
   }
 
   /// The gate's current or next closure window relative to [now]: the window

@@ -69,34 +69,33 @@ WeatherReport _report({
   String? headline,
   List<RainChance> rain = const [],
   List<WeeklyDay>? week,
-}) =>
-    WeatherReport(
-      area: const ForecastArea(
-        municipality: '長柄町',
-        municipalityEn: 'Nagara Town',
-        class10: '120020',
-        class10En: 'North-eastern Region',
-        office: '120000',
-        km: 4.0,
-      ),
-      areaName: '北東部',
-      office: '銚子地方気象台',
-      reportedAt: DateTime.utc(2026, 7, 25, 1, 40), // 10:40 JST
-      headline: headline,
-      overview: '千葉県は、晴れています。',
-      days: [
-        WeatherDay(
-          at: DateTime.utc(2026, 7, 24, 20), // 05:00 JST on the 25th
-          weather: '晴れのち雷雨',
-          code: '201',
-          wind: '北の風',
-          wave: '１．５メートル',
-          tempMax: 35,
-        ),
-      ],
-      rain: rain,
-      week: week ?? _week,
-    );
+}) => WeatherReport(
+  area: const ForecastArea(
+    municipality: '長柄町',
+    municipalityEn: 'Nagara Town',
+    class10: '120020',
+    class10En: 'North-eastern Region',
+    office: '120000',
+    km: 4.0,
+  ),
+  areaName: '北東部',
+  office: '銚子地方気象台',
+  reportedAt: DateTime.utc(2026, 7, 25, 1, 40), // 10:40 JST
+  headline: headline,
+  overview: '千葉県は、晴れています。',
+  days: [
+    WeatherDay(
+      at: DateTime.utc(2026, 7, 24, 20), // 05:00 JST on the 25th
+      weather: '晴れのち雷雨',
+      code: '201',
+      wind: '北の風',
+      wave: '１．５メートル',
+      tempMax: 35,
+    ),
+  ],
+  rain: rain,
+  week: week ?? _week,
+);
 
 final _week = [
   WeeklyDay(
@@ -369,8 +368,7 @@ void main() {
       showWeatherSheet(
         ctx,
         at: const LatLng(51.5, -0.12),
-        load: (_) async =>
-            throw JmaForecastException('no JMA forecast area covers this'),
+        load: (_) async => throw NoForecastAreaException(),
         onOpenSource: (_) {},
       );
       await t.pumpAndSettle();

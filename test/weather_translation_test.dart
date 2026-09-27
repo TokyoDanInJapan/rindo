@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:rindo/jma/jma_forecast.dart';
-import 'package:rindo/translate/closure_translator.dart';
+import 'package:rindo/translate/ja_en_translator.dart';
 import 'package:rindo/translate/weather_translation.dart';
 
 /// The division of labour: place names come from JMA's own English (baked into
@@ -11,7 +11,7 @@ import 'package:rindo/translate/weather_translation.dart';
 
 /// Deterministic, no platform channels: "translates" by prefixing, and records
 /// what it was asked to translate.
-class _FakeTranslator extends ClosureTranslator {
+class _FakeTranslator extends JaEnTranslator {
   _FakeTranslator({this.ready = true});
 
   final bool ready;
@@ -74,7 +74,10 @@ void main() {
   });
 
   test('prose and per-day text go through the model', () async {
-    final out = await translateReport(_report(headline: '雷注意'), _FakeTranslator());
+    final out = await translateReport(
+      _report(headline: '雷注意'),
+      _FakeTranslator(),
+    );
 
     expect(out.overview, 'EN:千葉県は、晴れています。');
     expect(out.headline, 'EN:雷注意');

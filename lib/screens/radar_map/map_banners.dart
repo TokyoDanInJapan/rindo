@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../net/net_error.dart';
-import '../../translate/closure_translator.dart';
+import '../../translate/ja_en_translator.dart';
 import 'model_download_banner.dart';
 import 'screen_margin.dart';
 

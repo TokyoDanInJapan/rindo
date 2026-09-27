@@ -6,6 +6,7 @@ import 'package:http/testing.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:rindo/closures/closure_repository.dart';
 import 'package:rindo/closures/road_closure.dart';
+import 'package:rindo/closures/search_area.dart';
 import 'package:rindo/closures/seasonal_gates.dart';
 
 // A pass in Nagano that nominally closes Nov 15 and reopens Apr 20.
@@ -52,7 +53,11 @@ http.Client _fakeLive() => MockClient((req) async {
     return http.Response('{"type":"FeatureCollection","features":[]}', 200);
   }
   if (path.contains('pcTukokisei_')) {
-    return http.Response('no backup path here', 200);
+    // A live data path; its category files 404, which reads as empty.
+    return http.Response(
+      '<script src="../backup/20260713225000/x/init.js">',
+      200,
+    );
   }
   return http.Response('not found', 404);
 });
@@ -73,7 +78,7 @@ void main() {
 
       final c = SeasonalGateSource(gates: const [_gate], now: () => now);
       expect(
-        c.fetchNear(_nearGate, 50),
+        c.fetch(CircleArea(_nearGate, 50)).then((r) => r.closures),
         completion([
           predicate<RoadClosure>(
             (r) => r.statusAt(now) == ClosureStatus.scheduled,
@@ -117,16 +122,17 @@ void main() {
       gates: const [_gate],
       now: () => DateTime(2026, 7, 14),
     );
-    expect(await source.fetchNear(const LatLng(34.7, 135.5), 50), isEmpty);
-    expect(await source.fetchNear(_nearGate, 50), hasLength(1));
+    Future<List<RoadClosure>> near(LatLng p) async =>
+        (await source.fetch(CircleArea(p, 50))).closures;
+    expect(await near(const LatLng(34.7, 135.5)), isEmpty);
+    expect(await near(_nearGate), hasLength(1));
   });
 
   test('bundled dataset materialises against today without errors', () async {
     // 渋峠 gate is in the bundled data; search around Kusatsu.
-    final all = await SeasonalGateSource().fetchNear(
-      const LatLng(36.62, 138.60),
-      50,
-    );
+    final all = (await SeasonalGateSource().fetch(
+      CircleArea(const LatLng(36.62, 138.60), 50),
+    )).closures;
     expect(all.map((c) => c.id), contains('seasonal-r292-shibu'));
     for (final c in all) {
       expect(c.isSeasonal, isTrue);
@@ -137,10 +143,9 @@ void main() {
   test('every bundled gate ships road geometry near its point', () async {
     // Far-north center + huge radius = the whole country; every curated gate
     // must come back with generated lines that hug its own coordinates.
-    final all = await SeasonalGateSource().fetchNear(
-      const LatLng(38, 138),
-      500,
-    );
+    final all = (await SeasonalGateSource().fetch(
+      CircleArea(const LatLng(38, 138), 500),
+    )).closures;
     expect(all, hasLength(seasonalGates.length));
     for (final c in all) {
       expect(c.lines, isNotEmpty, reason: '${c.id} has no geometry');
@@ -186,9 +191,10 @@ void main() {
     );
     final (closures, errors) = await repo.fetchNear(_nearGate, 50);
     expect(closures.map((c) => c.id), contains('seasonal-test-pass'));
-    // JARTIC's index fetch and the landslide feed both fail over the dead
-    // network; MLIT self-degrades internally.
-    expect(errors, hasLength(2));
+    // Every live source fails over the dead network, and each one says so.
+    // MLIT used to swallow its failures, which read as 'no closures'.
+    expect(errors, hasLength(3));
+    expect(errors.join(), contains('MLIT'));
     expect(errors.join(), contains('JARTIC'));
     expect(errors.join(), contains('土砂災害警戒情報'));
   });

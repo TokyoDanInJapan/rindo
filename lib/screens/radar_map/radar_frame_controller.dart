@@ -58,6 +58,14 @@ class RadarFrameController extends ChangeNotifier {
   Timer? _errorTimer;
   Timer? _reconnectTimer;
   bool _disposed = false;
+  bool _started = false;
+  bool _suspended = false;
+
+  // The load in flight, shared by every caller that asks meanwhile. The
+  // refresh timer, the reconnect backoff, an app resume and the refresh
+  // button can all ask at once, and two loads finishing out of order could
+  // put an older frame set back on screen.
+  Future<void>? _loading;
 
   List<JmaFrame> get frames => _frames;
   int get frameIndex => _frameIndex;
@@ -68,12 +76,45 @@ class RadarFrameController extends ChangeNotifier {
 
   /// Start the first load, and start the playback and refresh timers.
   void start() {
-    load();
+    _started = true;
+    unawaited(load());
+    _playTimer?.cancel();
+    _refreshTimer?.cancel();
     _playTimer = Timer.periodic(frameTick, (_) => tick());
     _refreshTimer = Timer.periodic(refreshEvery, (_) => load());
   }
 
-  Future<void> load() async {
+  /// The app went to the background. Stop playback, the refresh and any
+  /// reconnect backoff, so a hidden map spends no battery or data.
+  void suspend() {
+    _suspended = true;
+    _playTimer?.cancel();
+    _refreshTimer?.cancel();
+    _reconnectTimer?.cancel();
+    _playTimer = _refreshTimer = _reconnectTimer = null;
+  }
+
+  /// The app is back in front. Restart what [suspend] stopped, with a fresh
+  /// load, because the frames have almost certainly moved on.
+  void resume() {
+    if (!_suspended) {
+      unawaited(load());
+      return;
+    }
+    _suspended = false;
+    if (_started) {
+      start();
+    } else {
+      unawaited(load());
+    }
+  }
+
+  /// Fetch the frame set. Callers that ask while a load is in flight share
+  /// it, rather than starting another.
+  Future<void> load() =>
+      _loading ??= _load().whenComplete(() => _loading = null);
+
+  Future<void> _load() async {
     try {
       final frames = await _loader();
       if (_disposed) return;
@@ -135,15 +176,19 @@ class RadarFrameController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Scrubber seek. It also pauses playback.
+  /// Scrubber seek. It also pauses playback. An index outside the frame set
+  /// is clamped, so a stale scrubber position cannot index past the end.
   void seek(int i) {
+    if (_frames.isEmpty) return;
     _playing = false;
-    _frameIndex = i;
+    _frameIndex = i.clamp(0, _frames.length - 1);
     notifyListeners();
   }
 
   void _scheduleReconnect() {
     _reconnectTimer?.cancel();
+    // Suspended: the resume loads anyway, so there is nothing to back off.
+    if (_suspended) return;
     final secs =
         reconnectBackoff[_reconnectAttempt.clamp(
           0,
@@ -151,7 +196,7 @@ class RadarFrameController extends ChangeNotifier {
         )];
     _reconnectAttempt++;
     _reconnectTimer = Timer(Duration(seconds: secs), () {
-      load();
+      unawaited(load());
       onReconnect?.call();
     });
   }

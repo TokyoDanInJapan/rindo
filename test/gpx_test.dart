@@ -71,4 +71,12 @@ void main() {
       expect(nearRoute(route, const LatLng(36.5, 139.0), 10), isFalse);
     });
   });
+
+  test('loadGpx parses and thins off the main isolate', () async {
+    final route = await loadGpx(_track);
+    expect(route.points.first, const LatLng(35.45, 139.55));
+    expect(route.points.last, const LatLng(35.55, 139.65));
+    expect(route.fit, isNotEmpty);
+    await expectLater(loadGpx('<nope/>'), throwsFormatException);
+  });
 }

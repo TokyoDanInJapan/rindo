@@ -10,6 +10,7 @@ import 'package:rindo/closures/jartic_source.dart';
 import 'package:rindo/closures/mlit_source.dart';
 import 'package:rindo/closures/prefectures.dart';
 import 'package:rindo/closures/road_closure.dart';
+import 'package:rindo/closures/search_area.dart';
 
 // Fixtures are real responses captured from both services on 2026-07-13.
 final _r13 = File('test/fixtures/r13.json').readAsStringSync();
@@ -17,7 +18,9 @@ final _tuko83 = File('test/fixtures/tuko83.json').readAsStringSync();
 
 const _shinjuku = LatLng(35.69, 139.70);
 
-http.Client _fake() => MockClient((req) async {
+http.Client _fake() => MockClient(_fakeResponse);
+
+Future<http.Response> _fakeResponse(http.Request req) async {
   final path = req.url.path;
   if (path.contains('/landslide/map.json')) {
     return http.Response('[]', 200); // no active landslide alerts
@@ -42,16 +45,20 @@ http.Client _fake() => MockClient((req) async {
     );
   }
   if (path.contains('pcTukokisei_')) {
-    return http.Response('no backup path here', 200);
+    // A live data path; its category files 404, which reads as empty.
+    return http.Response(
+      '<script src="../backup/20260713225000/x/init.js">',
+      200,
+    );
   }
   if (path.contains('/TukoKisei/83.json')) {
     return http.Response.bytes(utf8.encode(_tuko83), 200);
   }
   if (path.contains('/TokiTuko/')) {
-    return http.Response('{"13_東京都":[]}', 200);
+    return http.Response.bytes(utf8.encode('{"13_東京都":[]}'), 200);
   }
   return http.Response('not found', 404);
-});
+}
 
 void main() {
   test('prefecture lookup includes neighbours within the radius', () {
@@ -65,7 +72,11 @@ void main() {
   test(
     'JARTIC keeps only full closures, with geometry and source link',
     () async {
-      final closures = await JarticSource(_fake()).fetchNear(_shinjuku, 50);
+      final result = await JarticSource(
+        _fake(),
+      ).fetch(CircleArea(_shinjuku, 50));
+      expect(result.problems, isEmpty);
+      final closures = result.closures;
       expect(closures, hasLength(3)); // 3 通行止 among 370 R13 regulations
       for (final c in closures) {
         expect(c.restriction, contains('通行止'));
@@ -80,14 +91,46 @@ void main() {
 
   test('MLIT resolves the backup path and keeps only 通行止 records', () async {
     // 国道16号 closure in the fixture sits near Yokohama.
-    final closures = await MlitSource(
+    final result = await MlitSource(
       _fake(),
-    ).fetchNear(const LatLng(35.45, 139.55), 50);
+    ).fetch(CircleArea(const LatLng(35.45, 139.55), 50));
+    expect(result.problems, isEmpty);
+    final closures = result.closures;
     expect(closures, hasLength(2)); // 2 通行止 among 130 Kanto regulations
     final r16 = closures.firstWhere((c) => c.roadName == '国道16号');
     expect(r16.period, contains('2026'));
     expect(r16.lines, isNotEmpty);
     expect(r16.sourceUrl.toString(), contains('pcTukokisei_83_1.html'));
+  });
+
+  test('a JARTIC tile that fails falls back to the last good copy and says '
+      'so', () async {
+    var tileUp = true;
+    final source = JarticSource(
+      MockClient((req) async {
+        if (!tileUp && req.url.path.contains('/d/301/R13.json')) {
+          return http.Response('busy', 503);
+        }
+        return _fakeResponse(req);
+      }),
+    );
+    final area = CircleArea(_shinjuku, 50);
+    final first = await source.fetch(area);
+    expect(first.closures, hasLength(3));
+
+    tileUp = false;
+    final second = await source.fetch(area);
+    expect(second.closures, hasLength(3));
+    expect(second.problems.single, contains('showing the last data received'));
+  });
+
+  test('an MLIT page with no data path is reported, not read as "no '
+      'closures"', () async {
+    final result = await MlitSource(
+      MockClient((_) async => http.Response('redesigned page', 200)),
+    ).fetch(CircleArea(const LatLng(35.45, 139.55), 50));
+    expect(result.closures, isEmpty);
+    expect(result.problems.single, contains('unavailable'));
   });
 
   test(
@@ -156,5 +199,52 @@ void main() {
       sourceUrl: Uri.parse('https://example.com'),
     );
     expect(repo.debugIsDuplicate(different, [mlit]), isFalse);
+  });
+
+  test('an MLIT record without start, end or dates has no section or '
+      'period, rather than empty ones', () async {
+    final result = await MlitSource(
+      MockClient((req) async {
+        if (req.url.path.contains('pcTukokisei_')) {
+          return http.Response(
+            '<script src="../backup/20260713225000/x/a.js">',
+            200,
+          );
+        }
+        if (req.url.path.contains('/TukoKisei/83.json')) {
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode({
+                '14_神奈川県': [
+                  {
+                    'kisei_naiyo_cd': '01',
+                    'kisei_meisho': '通行止',
+                    'rosen_name': '国道16号',
+                    'kisei_kaishi_chiten': ' ',
+                    'iconData': {
+                      'point': ['139.55', '35.45'],
+                    },
+                  },
+                ],
+              }),
+            ),
+            200,
+          );
+        }
+        return http.Response('not found', 404);
+      }),
+    ).fetch(CircleArea(const LatLng(35.45, 139.55), 10));
+    final c = result.closures.single;
+    expect(c.section, isNull);
+    expect(c.period, isNull);
+  });
+
+  test("Tokyo's islands no longer pull R13 into searches around Nagoya, "
+      'but Ogasawara still gets it', () {
+    List<String> codes(LatLng p) =>
+        prefecturesNear(p, 50).map((p) => p.code).toList();
+    expect(codes(const LatLng(35.18, 136.91)), isNot(contains('13')));
+    expect(codes(const LatLng(27.09, 142.19)), ['13']);
+    expect(codes(_shinjuku).where((c) => c == '13'), hasLength(1));
   });
 }
