@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 
 import '../closures/road_closure.dart';
+import 'restriction_glossary.dart';
 
 /// Where the translator is in its lifecycle, for the UI to narrate.
 enum TranslatorStatus { idle, downloadingModel, ready, failed }
@@ -103,7 +104,8 @@ class JaEnTranslator {
       point: c.point,
       roadName: await translateText(c.roadName),
       section: c.section == null ? null : await translateText(c.section!),
-      restriction: await translateText(c.restriction),
+      // Never machine-translated: see restriction_glossary.dart.
+      restriction: await restrictionInEnglish(c.restriction, translateText),
       cause: c.cause == null ? null : await translateText(c.cause!),
       period: c.period == null ? null : await translateText(c.period!),
       sourceName: await translateText(c.sourceName),
