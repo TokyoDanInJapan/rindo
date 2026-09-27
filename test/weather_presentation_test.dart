@@ -58,7 +58,8 @@ void main() {
       expect(
         colours.values.toSet(),
         hasLength(4),
-        reason: 'four families, four colours - otherwise the icon carries it '
+        reason:
+            'four families, four colours - otherwise the icon carries it '
             'alone and a wet day looks like a dry one',
       );
       expect(weatherColor(null, ctx), Theme.of(ctx).disabledColor);

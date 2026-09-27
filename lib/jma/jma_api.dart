@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../net/feed_exception.dart';
+
 /// Direct client for JMA's undocumented nowcast endpoints. These are the same
 /// ones that power https://www.jma.go.jp/bosai/nowc/, ported from
 /// garmin-jma-radar's proxy/src/jma.js. They are not an official API and can
@@ -139,16 +141,28 @@ class JmaApi {
     return pairs;
   }
 
+  /// The forecast pairs, or none if the forecast index cannot be read.
+  Future<List<_TimePair>> _forecastOrNone() async {
+    try {
+      return await _fetchTimes(_forecastUrl, observedOnly: false);
+    } catch (_) {
+      return const [];
+    }
+  }
+
   /// Assemble the −15…+60 min frame set (15-min steps), oldest-first.
   /// Past and now frames come from observed (N1), and forecast frames from N2.
   /// The two share an anchor, because N2's basetime is the latest analysis
   /// time. Offsets that JMA has no frame for right now are skipped silently.
+  ///
+  /// The observed index is required. The forecast index is not: if it fails,
+  /// the past and 'now' frames still show, which beats no radar at all.
   Future<List<JmaFrame>> getFrames() async {
-    final results = await Future.wait([
-      _fetchTimes(_observedUrl, observedOnly: true),
-      _fetchTimes(_forecastUrl, observedOnly: false),
-    ]);
-    final observed = results[0], forecast = results[1];
+    // Both start at once. The forecast fetch cannot fail, so its error cannot
+    // go unhandled while the observed fetch is still being awaited.
+    final forecastFetch = _forecastOrNone();
+    final observed = await _fetchTimes(_observedUrl, observedOnly: true);
+    final forecast = await forecastFetch;
 
     // Anchor 'now' on the forecast basetime, the latest analysis. Fall back
     // to the newest observed validtime if the forecast list is unavailable.
@@ -184,9 +198,9 @@ class JmaApi {
 }
 
 /// JMA endpoint returned something unusable (bad status, empty index).
-class JmaException implements Exception {
-  final String message;
-  JmaException(this.message);
+class JmaException extends FeedException {
+  JmaException(String message) : super('JMA radar', message);
+
   @override
   String toString() => 'JmaException: $message';
 }

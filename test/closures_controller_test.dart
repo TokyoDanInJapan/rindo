@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -8,7 +9,7 @@ import 'package:rindo/closures/closure_repository.dart';
 import 'package:rindo/closures/road_closure.dart';
 import 'package:rindo/closures/seasonal_gates.dart';
 import 'package:rindo/screens/radar_map/closures_controller.dart';
-import 'package:rindo/translate/closure_translator.dart';
+import 'package:rindo/translate/ja_en_translator.dart';
 
 /// The controller is the app's logic hub; these tests pin the refresh
 /// gating, the rider/pin/route precedence, partial-source degradation, the
@@ -18,7 +19,13 @@ const _home = LatLng(36.0, 138.0); // in Nagano's bbox → JARTIC tile R20
 
 /// A JARTIC tile with one closure 1.5 km from [_home]; MLIT empty.
 /// [onTarget] is called for every JARTIC index fetch - a fetch counter.
-http.Client _fakeLive({void Function()? onTarget}) => MockClient((req) async {
+http.Client _fakeLive({void Function()? onTarget}) =>
+    MockClient((req) => _liveResponse(req, onTarget: onTarget));
+
+Future<http.Response> _liveResponse(
+  http.Request req, {
+  void Function()? onTarget,
+}) async {
   final path = req.url.path;
   if (path.contains('/landslide/map.json')) {
     return http.Response('[]', 200); // no active landslide alerts
@@ -43,13 +50,17 @@ http.Client _fakeLive({void Function()? onTarget}) => MockClient((req) async {
     return http.Response('{"type":"FeatureCollection","features":[]}', 200);
   }
   if (path.contains('pcTukokisei_')) {
-    return http.Response('no backup path here', 200);
+    // A live data path; its category files 404, which reads as empty.
+    return http.Response(
+      '<script src="../backup/20260713225000/x/init.js">',
+      200,
+    );
   }
   return http.Response('not found', 404);
-});
+}
 
 /// Deterministic, no platform channels: instantly "translates" by prefixing.
-class _FakeTranslator extends ClosureTranslator {
+class _FakeTranslator extends JaEnTranslator {
   @override
   Future<bool> ensureReady() async => true;
 
@@ -72,7 +83,7 @@ class _Clock {
 
 (ClosuresController, _Clock, List<int>) _build({
   http.Client? client,
-  ClosureTranslator? translator,
+  JaEnTranslator? translator,
   bool japanese = true,
 }) {
   final clock = _Clock();
@@ -217,6 +228,93 @@ void main() {
     c.toggleLanguage(); // Japanese: originals, immediately
     expect(c.english, isFalse);
     expect(c.shown.single.roadName, '県道８４号');
+  });
+
+  test('a dead zone keeps the closures already known, says so, and retries '
+      'soon rather than after 15 minutes', () async {
+    var online = true;
+    var fetches = 0;
+    final (c, clock, _) = _build(
+      client: MockClient((req) async {
+        if (!online) throw http.ClientException('no net');
+        return _liveResponse(req, onTarget: () => fetches++);
+      }),
+    );
+    c.setRider(_home);
+    await pumpEventQueue();
+    expect(c.shown, hasLength(1));
+    expect(c.error, isNull);
+
+    // Signal lost: a forced refetch fails everywhere.
+    online = false;
+    clock.advance(const Duration(minutes: 1));
+    await c.refresh(force: true);
+    expect(c.shown.map((r) => r.roadName), ['県道８４号']);
+    expect(c.error, contains('showing the last data received'));
+
+    // Signal back. A partial fetch is not fresh for long, so the next fix
+    // refetches after the short retry, even without moving.
+    online = true;
+    clock.advance(ClosuresController.retryPartialAfter);
+    final before = fetches;
+    c.setRider(_home);
+    await pumpEventQueue();
+    expect(fetches, before + 1);
+    expect(c.error, isNull);
+  });
+
+  test('a feed that stays down is retried less and less often', () async {
+    var fetches = 0;
+    final (c, clock, _) = _build(
+      client: MockClient((req) async {
+        if (req.url.path.contains('pcTukokisei_')) {
+          throw http.ClientException('MLIT down'); // one source stays dead
+        }
+        return _liveResponse(req, onTarget: () => fetches++);
+      }),
+    );
+    Future<void> fixAfter(Duration d) async {
+      clock.advance(d);
+      c.setRider(_home);
+      await pumpEventQueue();
+    }
+
+    await fixAfter(Duration.zero); // 1st fetch, partial
+    await fixAfter(ClosuresController.retryPartialAfter); // retried
+    expect(fetches, 2);
+    // Two partial fetches in a row: the next wait is twice as long.
+    await fixAfter(ClosuresController.retryPartialAfter);
+    expect(fetches, 2);
+    await fixAfter(ClosuresController.retryPartialAfter);
+    expect(fetches, 3);
+  });
+
+  test('a pin dropped while the rider fetch is in flight still loads the '
+      "pin's closures, and the rider results are dropped", () async {
+    final gate = Completer<void>();
+    final centres = <String>[];
+    final (c, _, _) = _build(
+      client: MockClient((req) async {
+        if (req.url.path.endsWith('/target.json')) {
+          centres.add('fetch');
+          if (centres.length == 1) await gate.future; // hold the first fetch
+        }
+        return _liveResponse(req);
+      }),
+    );
+    c.setRider(_home);
+    await pumpEventQueue();
+    expect(c.loading, isTrue);
+
+    // Far from the rider: nothing from the fixture tile is within 50 km.
+    const pin = LatLng(33.0, 131.0);
+    c.dropPin(pin);
+    gate.complete();
+    await pumpEventQueue();
+    expect(centres, hasLength(2), reason: 'the queued pin fetch ran');
+    expect(c.searchCenter, pin);
+    expect(c.shown, isEmpty, reason: "the rider's closure is not the pin's");
+    expect(c.loading, isFalse);
   });
 
   test(

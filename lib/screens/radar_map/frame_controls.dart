@@ -61,7 +61,12 @@ class FrameControls extends StatelessWidget {
                     value: frameIndex.toDouble(),
                     max: (frames.length - 1).clamp(1, 99).toDouble(),
                     divisions: (frames.length - 1).clamp(1, 99),
-                    onChanged: frames.isEmpty ? null : (v) => onSeek(v.round()),
+                    // One frame has nowhere to seek to. The slider still
+                    // needs a range, so max stays 1, but a drag to it would
+                    // index past the end.
+                    onChanged: frames.length < 2
+                        ? null
+                        : (v) => onSeek(v.round()),
                   ),
                   // One dot per frame, coloured by tile load state, so that a
                   // frame whose radar imagery is missing shows at a glance.

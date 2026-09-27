@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart' show NetworkImageLoadException;
 import 'package:flutter_map/flutter_map.dart';
 
 /// Tracks tiles that failed to load, per layer, so the UI can say how many
@@ -16,12 +17,17 @@ class TileStatusMonitor extends ChangeNotifier {
   /// Record a failed tile. Radar layers 404 by design on rain-free tiles, so
   /// those are expected and never counted.
   void recordError(String layer, TileCoordinates coords, Object error) {
-    if ('$error'.contains('statusCode: 404')) return;
+    if (_isNotFound(error)) return;
     final key = '$layer/${coords.z}/${coords.x}/${coords.y}';
     final added = _failed.add(key);
     lastError = '$error';
     if (added) notifyListeners();
   }
+
+  static bool _isNotFound(Object error) => error is NetworkImageLoadException
+      ? error.statusCode == 404
+      // Kept for errors that arrive wrapped or stringified.
+      : '$error'.contains('statusCode: 404');
 
   /// Forget everything. This is called when the tile layers are re-keyed, on a
   /// retry, on connectivity healing, or on replaced radar frames.

@@ -10,6 +10,8 @@ import 'package:rindo/jma/jma_api.dart';
 /// the defensive sort). N2: forecasts +5..+60 min sharing the anchor basetime.
 http.Client _fakeJma({
   bool emptyForecast = false,
+  bool forecastDown = false,
+  bool observedDown = false,
   List<String> drop = const [],
 }) {
   const anchor = '20260713120000';
@@ -31,9 +33,11 @@ http.Client _fakeJma({
         },
   ];
   return MockClient((req) async {
-    final body = req.url.path.endsWith('targetTimes_N1.json')
-        ? observed
-        : forecast;
+    final isN1 = req.url.path.endsWith('targetTimes_N1.json');
+    if (isN1 ? observedDown : forecastDown) {
+      throw http.ClientException('connection closed');
+    }
+    final body = isN1 ? observed : forecast;
     final filtered = body.where((t) => !drop.contains(t['validtime'])).toList();
     return http.Response(jsonEncode(filtered), 200);
   });
@@ -110,5 +114,19 @@ void main() {
       offsetMin: 0,
     );
     expect(f.jstLabel, '03:30');
+  });
+
+  test('a failed forecast index still shows the observed frames', () async {
+    final frames = await JmaApi(
+      client: _fakeJma(forecastDown: true),
+    ).getFrames();
+    expect(frames.map((f) => f.offsetMin), [-15, 0]);
+  });
+
+  test('a failed observed index is an error', () {
+    expect(
+      JmaApi(client: _fakeJma(observedDown: true)).getFrames(),
+      throwsA(isA<http.ClientException>()),
+    );
   });
 }

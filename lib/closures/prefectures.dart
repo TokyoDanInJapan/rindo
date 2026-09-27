@@ -10,20 +10,22 @@ import 'package:latlong2/latlong.dart';
 // prefecturesAlong, for the route corridor, lives here next to
 // prefecturesNear.
 
-/// Prefectures whose bounding box intersects the search circle. The bounding
+/// Prefectures whose bounding box intersects the search circle. A prefecture
+/// with two boxes (Tokyo) is listed once. The bounding
 /// box is expanded by the radius, so a rider near a border pulls the
 /// neighbouring prefecture too. A false positive costs one small tile fetch.
 List<Prefecture> prefecturesNear(LatLng center, double radiusKm) {
   final dLat = radiusKm / 111.0;
   final dLon = radiusKm / (111.32 * math.cos(center.latitude * math.pi / 180));
-  return [
+  final byCode = <String, Prefecture>{
     for (final p in prefectures)
       if (center.latitude >= p.minLat - dLat &&
           center.latitude <= p.maxLat + dLat &&
           center.longitude >= p.minLon - dLon &&
           center.longitude <= p.maxLon + dLon)
-        p,
-  ];
+        p.code: p,
+  };
+  return byCode.values.toList();
 }
 
 /// Union of [prefecturesNear] over the points of a thinned route: the tile set
@@ -69,7 +71,13 @@ const prefectures = <Prefecture>[
   Prefecture('10', '群馬県', [83], 35.9853, 138.3972, 37.0588, 139.6693),
   Prefecture('11', '埼玉県', [83], 35.7537, 138.7123, 36.2834, 139.9000),
   Prefecture('12', '千葉県', [83], 34.8995, 139.7394, 36.1041, 140.8709),
-  Prefecture('13', '東京都', [83], 20.4227, 136.0695, 35.8981, 153.9869),
+  // Tokyo in two boxes, both the R13 tile. One box for all of it reached
+  // from Okinotorishima to Minamitorishima, which pulled R13 into every
+  // search from Nagoya to the Boso peninsula. The mainland and the Izu
+  // islands are one box, and the Ogasawara group the other. The two remote
+  // atolls have no public roads.
+  Prefecture('13', '東京都', [83], 32.4000, 138.9000, 35.8981, 139.9900),
+  Prefecture('13', '東京都（小笠原）', [83], 24.2000, 141.2000, 27.8000, 142.3000),
   Prefecture('14', '神奈川県', [83], 35.1287, 138.9162, 35.6721, 139.7963),
   Prefecture('15', '新潟県', [84], 36.7369, 137.6349, 38.5534, 139.9001),
   Prefecture('16', '富山県', [84], 36.2745, 136.7688, 36.9803, 137.7625),

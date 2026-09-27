@@ -12,6 +12,7 @@ import '../../net/rekey_safe_tile_provider.dart';
 import 'closure_presentation.dart';
 import 'closures_controller.dart';
 import 'disclaimer.dart';
+import 'radar_frame_controller.dart';
 import 'tile_pulse.dart';
 
 /// The full map: prefecture skeleton, base tiles, stacked radar frames, the
@@ -27,8 +28,11 @@ class RadarMapView extends StatelessWidget {
   /// screen (see tile_http_client.dart).
   final Client httpClient;
 
-  final List<JmaFrame> frames;
-  final int frameIndex;
+  /// The radar frames and the playback position. Only the radar layers
+  /// listen to it. Playback moves the frame every 750 ms, and rebuilding the
+  /// whole map for that repainted every marker and polyline with it.
+  final RadarFrameController radar;
+
   final int tileEpoch;
   final bool greyscale;
 
@@ -61,8 +65,7 @@ class RadarMapView extends StatelessWidget {
     required this.mapController,
     required this.closures,
     required this.httpClient,
-    required this.frames,
-    required this.frameIndex,
+    required this.radar,
     required this.tileEpoch,
     required this.greyscale,
     required this.initialCenter,
@@ -130,7 +133,6 @@ class RadarMapView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final frame = frames.isEmpty ? null : frames[frameIndex];
     return FlutterMap(
       mapController: mapController,
       options: MapOptions(
@@ -147,7 +149,7 @@ class RadarMapView extends StatelessWidget {
         onLongPress: (_, latLng) => onLongPress(latLng),
       ),
       children: [
-        ..._baseAndRadar(frame),
+        ..._baseAndRadar(),
         ..._searchOverlay(),
         ..._closureLayers(),
         _attribution(context),
@@ -195,7 +197,7 @@ class RadarMapView extends StatelessWidget {
 
   /// Prefecture skeleton below the tiles, the base map, and the stacked radar
   /// frames. Only the active frame is visible.
-  List<Widget> _baseAndRadar(JmaFrame? frame) => [
+  List<Widget> _baseAndRadar() => [
     // The skeleton sits BELOW the tile layers, so it shows only where opaque
     // map tiles have not painted yet, either still loading or unreachable
     // offline. It disappears as those tiles arrive.
@@ -220,7 +222,7 @@ class RadarMapView extends StatelessWidget {
     // All frames stay mounted so that their tiles pre-load and the animation
     // never flickers. Only the active frame is visible. A 404 from JMA means
     // 'no rain in this tile' and simply renders as nothing.
-    _RadarFrameLayers(view: this, active: frame),
+    _RadarFrameLayers(view: this),
   ];
 
   /// The loaded GPX track. In point mode, the search ring plus its loading
@@ -259,9 +261,7 @@ class RadarMapView extends StatelessWidget {
       ),
       // While closures for the area are loading, the disc pulses.
       FadeTransition(
-        opacity: Tween(begin: 0.0, end: 0.15).animate(
-          CurvedAnimation(parent: closures.pulse, curve: Curves.easeInOut),
-        ),
+        opacity: closures.pulseOpacity,
         child: CircleLayer(
           circles: [
             CircleMarker(
@@ -454,10 +454,9 @@ class RadarMapView extends StatelessWidget {
 /// keeps rendering, scaled by at most 2× per level: briefly blockier, never
 /// blank.
 class _RadarFrameLayers extends StatefulWidget {
-  const _RadarFrameLayers({required this.view, required this.active});
+  const _RadarFrameLayers({required this.view});
 
   final RadarMapView view;
-  final JmaFrame? active;
 
   @override
   State<_RadarFrameLayers> createState() => _RadarFrameLayersState();
@@ -484,6 +483,27 @@ class _RadarFrameLayersState extends State<_RadarFrameLayers> {
   // value would re-key to a level the camera has already left.
   bool _settleElapsed = false;
 
+  RadarFrameController get _radar => widget.view.radar;
+
+  @override
+  void initState() {
+    super.initState();
+    _radar.addListener(_onRadar);
+  }
+
+  @override
+  void didUpdateWidget(_RadarFrameLayers old) {
+    super.didUpdateWidget(old);
+    if (old.view.radar != _radar) {
+      old.view.radar.removeListener(_onRadar);
+      _radar.addListener(_onRadar);
+    }
+  }
+
+  void _onRadar() {
+    if (mounted) setState(() {});
+  }
+
   void _cancelSettle() {
     _settle?.cancel();
     _settle = null;
@@ -492,6 +512,7 @@ class _RadarFrameLayersState extends State<_RadarFrameLayers> {
 
   @override
   void dispose() {
+    _radar.removeListener(_onRadar);
     _settle?.cancel();
     _preload?.cancel();
     super.dispose();
@@ -501,7 +522,7 @@ class _RadarFrameLayersState extends State<_RadarFrameLayers> {
   /// frame is in.
   void _mountNextFrame() {
     if (!mounted) return;
-    final frames = widget.view.frames;
+    final frames = _radar.frames;
     JmaFrame? next;
     for (final f in frames) {
       if (!_mountedFrames.contains(f.urlTemplate)) {
@@ -540,7 +561,7 @@ class _RadarFrameLayersState extends State<_RadarFrameLayers> {
       // The zoom moved towards another level, so start the settle clock
       // again. A rebuild *without* a zoom change keeps the pending timer
       // rather than pushing the switch out forever. Such a rebuild comes from
-      // a parent setState, because the asset monitor repaints constantly.
+      // a radar frame tick, every 750 ms, or from a parent setState.
       _settle?.cancel();
       _settle = Timer(RadarMapView._settleDelay, () {
         _settle = null;
@@ -551,6 +572,8 @@ class _RadarFrameLayersState extends State<_RadarFrameLayers> {
     _lastZoom = zoom;
 
     final v = widget.view;
+    final frames = _radar.frames;
+    final active = _radar.activeFrame;
     // Staged mounting. A re-key, from an epoch bump, a level switch or a new
     // frame set, makes every mounted frame refetch its whole grid at once.
     // That is six frames' worth of tiles racing through the per-host
@@ -564,26 +587,25 @@ class _RadarFrameLayersState extends State<_RadarFrameLayers> {
     // already fetching, and so never cancels one.
     final gen =
         '${v.tileEpoch}-z$_native-'
-        '${v.frames.isEmpty ? '' : v.frames.first.urlTemplate}';
+        '${frames.isEmpty ? '' : frames.first.urlTemplate}';
     if (gen != _generation) {
       _generation = gen;
       _mountedFrames.clear();
       _preload?.cancel();
-      _preload = v.frames.length > 1
+      _preload = frames.length > 1
           ? Timer.periodic(_preloadInterval, (_) => _mountNextFrame())
           : null;
     }
-    final active = widget.active;
     if (active != null) _mountedFrames.add(active.urlTemplate);
 
     // A plain Stack mirrors how FlutterMap lays out its own children, so
     // nesting the layers here changes nothing about their sizing.
     return Stack(
       children: [
-        for (final f in v.frames)
+        for (final f in frames)
           if (_mountedFrames.contains(f.urlTemplate))
             Opacity(
-              opacity: identical(f, widget.active) ? 0.7 : 0.0,
+              opacity: identical(f, active) ? 0.7 : 0.0,
               child: TileLayer(
                 key: ValueKey('${f.urlTemplate}-${v.tileEpoch}-z$_native'),
                 urlTemplate: f.urlTemplate,

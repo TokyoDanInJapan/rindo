@@ -69,11 +69,7 @@ String _forecastJson({
           'areas': [
             area('120010', '北西部', {
               'weatherCodes': ['212', '212'],
-              'weathers': [
-                'くもり　時々　晴れ',
-                'くもり　夜　雨',
-                if (thirdDay) 'くもり',
-              ],
+              'weathers': ['くもり　時々　晴れ', 'くもり　夜　雨', if (thirdDay) 'くもり'],
               'winds': ['北西の風　後　南東の風', '西の風'],
               if (withWaves) 'waves': ['０．５メートル', '０．５メートル'],
             }),
@@ -192,16 +188,18 @@ void main() {
   });
 
   group('fetch', () {
-    test('reads the subdivision the position is in, not the first listed',
-        () async {
-      final r = await JmaForecastApi(client: _fakeJma()).fetch(_inChiba);
-      expect(r.areaName, '北東部');
-      expect(r.days.first.weather, '晴れのち雷雨'); // ideographic padding stripped
-      expect(r.rain.map((p) => p.percent), [0, 30, 70]);
-      expect(r.office, '銚子地方気象台');
-      expect(r.overview, startsWith('千葉県は、晴れています。'));
-      expect(r.sourceUrl.toString(), contains('area_code=120000'));
-    });
+    test(
+      'reads the subdivision the position is in, not the first listed',
+      () async {
+        final r = await JmaForecastApi(client: _fakeJma()).fetch(_inChiba);
+        expect(r.areaName, '北東部');
+        expect(r.days.first.weather, '晴れのち雷雨'); // ideographic padding stripped
+        expect(r.rain.map((p) => p.percent), [0, 30, 70]);
+        expect(r.office, '銚子地方気象台');
+        expect(r.overview, startsWith('千葉県は、晴れています。'));
+        expect(r.sourceUrl.toString(), contains('area_code=120000'));
+      },
+    );
 
     test('pairs temperatures by clock time and drops an echoed low', () async {
       final r = await JmaForecastApi(client: _fakeJma()).fetch(_inChiba);
@@ -214,16 +212,18 @@ void main() {
       expect(tomorrow.tempMin, 26);
     });
 
-    test('survives an office that publishes no temperatures or waves',
-        () async {
-      final r = await JmaForecastApi(
-        client: _fakeJma(withTemps: false, withWaves: false),
-      ).fetch(_inChiba);
-      expect(r.days, isNotEmpty);
-      expect(r.days.first.tempMax, isNull);
-      expect(r.days.first.wave, isNull);
-      expect(r.days.first.wind, isNotEmpty);
-    });
+    test(
+      'survives an office that publishes no temperatures or waves',
+      () async {
+        final r = await JmaForecastApi(
+          client: _fakeJma(withTemps: false, withWaves: false),
+        ).fetch(_inChiba);
+        expect(r.days, isNotEmpty);
+        expect(r.days.first.tempMax, isNull);
+        expect(r.days.first.wave, isNull);
+        expect(r.days.first.wind, isNotEmpty);
+      },
+    );
 
     test('surfaces a headline when JMA has one', () async {
       final quiet = await JmaForecastApi(client: _fakeJma()).fetch(_inChiba);
@@ -253,39 +253,46 @@ void main() {
       expect(r.week.map((d) => d.reliability), ['C', 'A']);
     });
 
-    test('keeps a wording-only day in the week table, where it has numbers',
-        () async {
-      final r = await JmaForecastApi(
-        client: _fakeJma(thirdDay: true),
-      ).fetch(_inChiba);
+    test(
+      'keeps a wording-only day in the week table, where it has numbers',
+      () async {
+        final r = await JmaForecastApi(
+          client: _fakeJma(thirdDay: true),
+        ).fetch(_inChiba);
 
-      // 27 July appears in the detailed block as wording alone - no
-      // temperatures, no rain chance - so the weekly block is the only place
-      // its numbers exist. Dropping it as "already covered" would lose them.
-      expect(r.days.map((d) => jstDate(d.at)), [(7, 25), (7, 26), (7, 27)]);
-      expect(r.days.last.tempMax, isNull);
-      final july27 = r.week.firstWhere((d) => jstDate(d.at) == (7, 27));
-      expect(july27.tempMax, 29);
-      expect(july27.pop, 30);
-      // The two days that *do* have detail stay out of the weekly table.
-      expect(r.week.map((d) => jstDate(d.at)), isNot(contains((7, 25))));
-      expect(r.week.map((d) => jstDate(d.at)), isNot(contains((7, 26))));
-    });
+        // 27 July appears in the detailed block as wording alone - no
+        // temperatures, no rain chance - so the weekly block is the only place
+        // its numbers exist. Dropping it as "already covered" would lose them.
+        expect(r.days.map((d) => jstDate(d.at)), [(7, 25), (7, 26), (7, 27)]);
+        expect(r.days.last.tempMax, isNull);
+        final july27 = r.week.firstWhere((d) => jstDate(d.at) == (7, 27));
+        expect(july27.tempMax, 29);
+        expect(july27.pop, 30);
+        // The two days that *do* have detail stay out of the weekly table.
+        expect(r.week.map((d) => jstDate(d.at)), isNot(contains((7, 25))));
+        expect(r.week.map((d) => jstDate(d.at)), isNot(contains((7, 26))));
+      },
+    );
 
-    test('leaves the week empty when JMA sends only the short-term block',
-        () async {
-      final client = MockClient((req) async {
-        if (req.url.path.contains('overview_forecast')) {
-          return http.Response.bytes(utf8.encode(_overviewJson), 200);
-        }
-        // A single-block response: seen when an office is mid-update.
-        final full = jsonDecode(_forecastJson()) as List;
-        return http.Response.bytes(utf8.encode(jsonEncode([full.first])), 200);
-      });
-      final r = await JmaForecastApi(client: client).fetch(_inChiba);
-      expect(r.days, isNotEmpty, reason: 'the detailed forecast still works');
-      expect(r.week, isEmpty);
-    });
+    test(
+      'leaves the week empty when JMA sends only the short-term block',
+      () async {
+        final client = MockClient((req) async {
+          if (req.url.path.contains('overview_forecast')) {
+            return http.Response.bytes(utf8.encode(_overviewJson), 200);
+          }
+          // A single-block response: seen when an office is mid-update.
+          final full = jsonDecode(_forecastJson()) as List;
+          return http.Response.bytes(
+            utf8.encode(jsonEncode([full.first])),
+            200,
+          );
+        });
+        final r = await JmaForecastApi(client: client).fetch(_inChiba);
+        expect(r.days, isNotEmpty, reason: 'the detailed forecast still works');
+        expect(r.week, isEmpty);
+      },
+    );
 
     test('throws for a position JMA does not cover', () async {
       await expectLater(
@@ -294,13 +301,15 @@ void main() {
       );
     });
 
-    test('throws on a bad response rather than showing a blank report',
-        () async {
-      await expectLater(
-        JmaForecastApi(client: _fakeJma(status: 503)).fetch(_inChiba),
-        throwsA(isA<JmaForecastException>()),
-      );
-    });
+    test(
+      'throws on a bad response rather than showing a blank report',
+      () async {
+        await expectLater(
+          JmaForecastApi(client: _fakeJma(status: 503)).fetch(_inChiba),
+          throwsA(isA<JmaForecastException>()),
+        );
+      },
+    );
   });
 
   group('jst helpers', () {

@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:rindo/closures/road_closure.dart';
-import 'package:rindo/translate/closure_translator.dart';
+import 'package:rindo/translate/ja_en_translator.dart';
 import 'package:rindo/translate/translation_controller.dart';
 
 /// Pins the language/translation state machine on its own: the originals-
@@ -20,7 +20,7 @@ RoadClosure _closure(String road) => RoadClosure(
 
 /// Deterministic, no platform channels: "translates" by prefixing. A gate
 /// (when provided) holds every translation until the test releases it.
-class _FakeTranslator extends ClosureTranslator {
+class _FakeTranslator extends JaEnTranslator {
   _FakeTranslator({this.gate});
 
   final Completer<void>? gate;
@@ -124,6 +124,24 @@ void main() {
     final before = notifications;
     await pumpEventQueue();
     expect(notifications, greaterThan(before));
+    t.dispose();
+  });
+
+  test('the translating flag holds until the last overlapping translation '
+      'lands', () async {
+    final first = Completer<void>();
+    final t = TranslationController(
+      translator: _FakeTranslator(gate: first),
+      english: true,
+    );
+    t.setSource([_closure('国道1号')]); // held by the gate
+    t.toggleLanguage();
+    t.toggleLanguage(); // English again: a second translation starts
+    expect(t.translating, isTrue);
+    first.complete();
+    await pumpEventQueue();
+    expect(t.translating, isFalse);
+    expect(t.shown.single.roadName, 'EN:国道1号');
     t.dispose();
   });
 }

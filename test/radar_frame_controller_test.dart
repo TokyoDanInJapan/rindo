@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rindo/jma/jma_api.dart';
@@ -138,6 +140,69 @@ void main() {
       final callsAtRecovery = calls;
       fa.elapse(const Duration(minutes: 2));
       expect(calls, callsAtRecovery); // no timers left running
+      c.dispose();
+    });
+  });
+
+  test('seek clamps to the frame set and ignores an empty one', () async {
+    final c = build();
+    c.seek(2); // no frames yet
+    expect(c.frameIndex, 0);
+    await c.load();
+    c.seek(99);
+    expect(c.frameIndex, 2);
+    expect(c.playing, isFalse);
+    c.dispose();
+  });
+
+  test('loads asked for while one is in flight share it', () async {
+    var calls = 0;
+    final gate = Completer<void>();
+    loader = () async {
+      calls++;
+      await gate.future;
+      return _frames('A');
+    };
+    final c = build();
+    final a = c.load();
+    final b = c.load();
+    gate.complete();
+    await Future.wait([a, b]);
+    expect(calls, 1);
+    expect(loaded, 1);
+    c.dispose();
+  });
+
+  test('suspend stops playback and the backoff; resume reloads', () {
+    fakeAsync((async) {
+      final c = build();
+      c.start();
+      async.flushMicrotasks();
+      final loadsBefore = loaded;
+      c.suspend();
+      final index = c.frameIndex;
+      async.elapse(const Duration(minutes: 10));
+      expect(c.frameIndex, index, reason: 'no playback in the background');
+      expect(loaded, loadsBefore, reason: 'no refresh in the background');
+
+      c.resume();
+      async.flushMicrotasks();
+      expect(loaded, loadsBefore + 1);
+      async.elapse(c.frameTick * 2);
+      expect(c.frameIndex, isNot(index), reason: 'playback restarted');
+      c.dispose();
+    });
+  });
+
+  test('a load that fails while suspended schedules no reconnect', () {
+    fakeAsync((async) {
+      loader = () async => throw Exception('offline');
+      final c = build();
+      c.suspend();
+      c.load();
+      async.flushMicrotasks();
+      async.elapse(const Duration(minutes: 1));
+      expect(reconnected, 0);
       c.dispose();
     });
   });

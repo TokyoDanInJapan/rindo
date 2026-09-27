@@ -3,11 +3,11 @@ import 'package:meta/meta.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../hazards/landslide_source.dart';
-import '../route/gpx_route.dart';
+import 'feed_result.dart';
 import 'jartic_source.dart';
 import 'mlit_source.dart';
-import 'prefectures.dart';
 import 'road_closure.dart';
+import 'search_area.dart';
 import 'seasonal_gates.dart';
 
 /// Combines the closure feeds: the curated seasonal-gate dataset (the only
@@ -32,71 +32,48 @@ class ClosureRepository {
     DateTime Function()? now,
   }) : this._(client ?? http.Client(), seasonal, now);
 
+  // One shared client, one connection pool.
   ClosureRepository._(
     http.Client client,
     SeasonalGateSource? seasonal,
     DateTime Function()? now,
-  ) : _jartic = JarticSource(client),
-      _mlit = MlitSource(client), // one shared client, one pool
+  ) : _jartic = JarticSource(client, now: now),
+      _mlit = MlitSource(client, now: now),
       _seasonal = seasonal ?? SeasonalGateSource(now: now),
-      _landslide = LandslideSource(client),
+      _landslide = LandslideSource(client, now: now),
       _now = now ?? DateTime.now;
 
   String get attribution => 'Closures: JARTIC · 国土交通省';
   Uri get attributionUrl => Uri.parse('https://www.jartic.or.jp/map/');
 
-  /// Merged closures plus one message per source that failed. One dead source
-  /// must not blank the list. The bundled seasonal gates work with no network
-  /// at all, and a JARTIC outage should not hide MLIT data.
+  /// Merged closures inside [area], plus one message per source problem. One
+  /// dead source must not blank the list. The bundled seasonal gates work
+  /// with no network at all, and a JARTIC outage should not hide MLIT data.
+  /// The live sources fall back to the last data they fetched for any part
+  /// that fails, and still report it.
+  Future<(List<RoadClosure>, List<String>)> fetch(SearchArea area) async {
+    final results = await Future.wait([
+      _guard('冬期閉鎖', _seasonal.fetch(area)),
+      _guard('MLIT', _mlit.fetch(area)),
+      _guard('JARTIC', _jartic.fetch(area)),
+      _guard('土砂災害警戒情報', _landslide.fetch(area)),
+    ]);
+    final errors = [for (final (_, problems) in results) ...problems];
+    final merged = _merge(results[0].$1, results[1].$1, results[2].$1);
+    return ([...merged, ...results[3].$1], errors);
+  }
+
+  /// Closures within [radiusKm] of [center].
   Future<(List<RoadClosure>, List<String>)> fetchNear(
     LatLng center,
     double radiusKm,
-  ) {
-    const dist = Distance();
-    return _fetchMerged(
-      seasonal: _seasonal.fetchNear(center, radiusKm),
-      mlit: _mlit.fetchNear(center, radiusKm),
-      jartic: _jartic.fetchNear(center, radiusKm),
-      landslide: _landslide.fetchWhere(
-        (p) => dist.as(LengthUnit.Kilometer, center, p) <= radiusKm,
-      ),
-    );
-  }
+  ) => fetch(CircleArea(center, radiusKm));
 
   /// Closures within [radiusKm] of any point on [route] (a GPX track, say).
   Future<(List<RoadClosure>, List<String>)> fetchAlong(
     List<LatLng> route,
     double radiusKm,
-  ) {
-    // A spacing of about 2 km keeps the corridor test cheap. The edge wobble
-    // that introduces is noise against a 10 km scouting radius.
-    final thinned = thinRoute(route, 2);
-    final prefs = prefecturesAlong(thinned, radiusKm);
-    bool keep(LatLng p) => nearRoute(thinned, p, radiusKm);
-    return _fetchMerged(
-      seasonal: _seasonal.fetchWhere((c) => keep(c.point)),
-      mlit: _mlit.fetchWhere(prefs, keep),
-      jartic: _jartic.fetchWhere(prefs, keep),
-      landslide: _landslide.fetchWhere(keep),
-    );
-  }
-
-  Future<(List<RoadClosure>, List<String>)> _fetchMerged({
-    required Future<List<RoadClosure>> seasonal,
-    required Future<List<RoadClosure>> mlit,
-    required Future<List<RoadClosure>> jartic,
-    required Future<List<RoadClosure>> landslide,
-  }) async {
-    final results = await Future.wait([
-      _guard('冬期閉鎖', seasonal),
-      _guard('MLIT', mlit),
-      _guard('JARTIC', jartic),
-      _guard('土砂災害警戒情報', landslide),
-    ]);
-    final errors = [for (final (_, error) in results) ?error];
-    final merged = _merge(results[0].$1, results[1].$1, results[2].$1);
-    return ([...merged, ...results[3].$1], errors);
-  }
+  ) => fetch(CorridorArea(route, radiusKm));
 
   List<RoadClosure> _merge(
     List<RoadClosure> seasonal,
@@ -109,33 +86,35 @@ class ClosureRepository {
     // is a separate event, typhoon damage in summer for example, and must
     // survive.
     final now = _now();
-    final activeGates = [
+    final kept = [
       for (final s in seasonal)
         if (s.statusAt(now) == ClosureStatus.active) s,
     ];
 
     final out = [...seasonal];
-    final keptMlit = <RoadClosure>[];
     for (final m in mlit) {
-      if (!debugIsDuplicate(m, activeGates)) {
+      if (!debugIsDuplicate(m, kept)) {
         out.add(m);
-        keptMlit.add(m);
+        kept.add(m);
       }
     }
     for (final j in jartic) {
-      if (!debugIsDuplicate(j, [...activeGates, ...keptMlit])) out.add(j);
+      if (!debugIsDuplicate(j, kept)) out.add(j);
     }
     return out;
   }
 
-  Future<(List<RoadClosure>, String?)> _guard(
+  /// A source's closures and its problems, each labelled with the source. A
+  /// source that throws outright still yields an empty list and one line.
+  Future<(List<RoadClosure>, List<String>)> _guard(
     String label,
-    Future<List<RoadClosure>> fetch,
+    Future<FeedResult> fetch,
   ) async {
     try {
-      return (await fetch, null);
+      final r = await fetch;
+      return (r.closures, [for (final p in r.problems) '$label: $p']);
     } catch (e) {
-      return (const <RoadClosure>[], '$label: $e');
+      return (const <RoadClosure>[], ['$label: $e']);
     }
   }
 
@@ -160,10 +139,11 @@ class ClosureRepository {
   }
 
   static final _routeRe = RegExp(r'(国道|都道|道道|府道|県道)(\d+)号');
+  static final _fullWidthDigit = RegExp(r'[０-９]');
 
   (String, String)? _routeKey(String roadName) {
     final normalized = roadName.replaceAllMapped(
-      RegExp(r'[０-９]'),
+      _fullWidthDigit,
       (m) => String.fromCharCode(m.group(0)!.codeUnitAt(0) - 0xFEE0),
     );
     final m = _routeRe.firstMatch(normalized);

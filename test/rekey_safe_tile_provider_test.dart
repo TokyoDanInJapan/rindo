@@ -58,10 +58,7 @@ const _url = 'https://tiles.example/{z}/{x}/{y}.png';
 
 Widget _map(String layerKey, http.Client client) => MaterialApp(
   home: FlutterMap(
-    options: const MapOptions(
-      initialCenter: LatLng(35, 139),
-      initialZoom: 10,
-    ),
+    options: const MapOptions(initialCenter: LatLng(35, 139), initialZoom: 10),
     children: [
       TileLayer(
         key: ValueKey(layerKey),
@@ -106,7 +103,10 @@ void main() {
           'entries instead of fetching - those tiles would stay blank forever',
     );
     // Every tile the second generation shows must have been asked for again.
-    expect(refetched.toSet(), containsAll(client.requested.take(first).toSet()));
+    expect(
+      refetched.toSet(),
+      containsAll(client.requested.take(first).toSet()),
+    );
   });
 
   testWidgets('a finished tile is still served from the image cache', (
@@ -115,9 +115,11 @@ void main() {
     var served = 0;
     final client = MockClient((_) async {
       served++;
-      return http.Response.bytes(_pngBytes, 200, headers: {
-        'content-type': 'image/png',
-      });
+      return http.Response.bytes(
+        _pngBytes,
+        200,
+        headers: {'content-type': 'image/png'},
+      );
     });
 
     await t.pumpWidget(_map('epoch-0', client));
