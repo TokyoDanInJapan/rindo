@@ -5,7 +5,9 @@ import 'dart:math' as math;
 /// Drop points closer than [minSpacingM] metres to the previously kept one;
 /// endpoints always survive (which also preserves ring closure).
 List<(double, double)> thinPoints(
-    List<(double, double)> pts, double minSpacingM) {
+  List<(double, double)> pts,
+  double minSpacingM,
+) {
   if (pts.length < 3) return pts;
   final out = [pts.first];
   for (var i = 1; i < pts.length - 1; i++) {

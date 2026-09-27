@@ -6,9 +6,10 @@ name: Build APK
 
 on:
   workflow_dispatch: # build on demand from the Actions tab
+  # Not on v* tags: the Release workflow builds and tests those, and a tag
+  # points at a main commit that has already been through this one.
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
     branches: [main]
 
@@ -41,6 +42,12 @@ jobs:
 
       - name: Install dependencies
         run: flutter pub get
+
+      # Generated tables (*.g.dart) stay as their tools write them.
+      - name: Check formatting
+        run: >-
+          git ls-files '*.dart' ':!:*.g.dart' |
+          xargs dart format --output=none --set-exit-if-changed
 
       - name: Analyze
         run: flutter analyze

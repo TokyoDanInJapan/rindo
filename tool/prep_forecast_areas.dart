@@ -61,9 +61,13 @@ Future<void> main() async {
     ..writeln('/// 5-digit municipality code -> (class10 subdivision, office,')
     ..writeln('/// subdivision name in English, municipality name in English).')
     ..writeln("/// Codes index JMA's forecast/overview_forecast endpoints; the")
-    ..writeln("/// names are JMA's own English, which beats machine-translating")
+    ..writeln(
+      "/// names are JMA's own English, which beats machine-translating",
+    )
     ..writeln('/// 北東部 into something a rider has to guess at.')
-    ..writeln('const forecastAreas = <String, (String, String, String, String)>{');
+    ..writeln(
+      'const forecastAreas = <String, (String, String, String, String)>{',
+    );
 
   var n = 0;
   final skipped = <String>[];

@@ -27,13 +27,13 @@ const queries = <String, (String, String)>{
   // 平湯峠～畳平
   'gifu5-norikura-skyline': (
     '36.10,137.48,36.18,137.62',
-    '["highway"]["name"~"乗鞍スカイライン"]'
+    '["highway"]["name"~"乗鞍スカイライン"]',
   ),
   // 三本滝～畳平 (OSM tags the road 乗鞍岳線 ref=84; bbox ends at 三本滝 so
   // the always-open valley stretch below stays out)
   'nagano84-norikura-echoline': (
     '36.09,137.55,36.14,137.65',
-    '["highway"]["ref"="84"]'
+    '["highway"]["ref"="84"]',
   ),
 };
 
@@ -81,10 +81,14 @@ Future<void> main() async {
     buf.writeln("  '${entry.key}': [");
     for (final line in lines) {
       buf.write('    [');
-      buf.write(line
-          .map((p) =>
-              'LatLng(${p.$1.toStringAsFixed(5)}, ${p.$2.toStringAsFixed(5)})')
-          .join(', '));
+      buf.write(
+        line
+            .map(
+              (p) =>
+                  'LatLng(${p.$1.toStringAsFixed(5)}, ${p.$2.toStringAsFixed(5)})',
+            )
+            .join(', '),
+      );
       buf.writeln('],');
     }
     buf.writeln('  ],');
@@ -94,19 +98,26 @@ Future<void> main() async {
   client.close();
 
   buf.writeln('};');
-  File('lib/closures/seasonal_gate_lines.g.dart')
-      .writeAsStringSync(buf.toString());
-  stdout.writeln('total $total points -> lib/closures/seasonal_gate_lines.g.dart');
+  File(
+    'lib/closures/seasonal_gate_lines.g.dart',
+  ).writeAsStringSync(buf.toString());
+  stdout.writeln(
+    'total $total points -> lib/closures/seasonal_gate_lines.g.dart',
+  );
 }
 
 /// The public Overpass instance 504s intermittently under load (it keeps
 /// only a couple of query slots per IP), so retry with backoff. GET with
 /// dart:io - form POSTs have also drawn 504s from its gateway.
 Future<String?> _fetchWithRetry(
-    HttpClient client, String label, String query) async {
+  HttpClient client,
+  String label,
+  String query,
+) async {
   for (var attempt = 1; attempt <= 5; attempt++) {
     final req = await client.getUrl(
-        Uri.parse('$_overpass?data=${Uri.encodeQueryComponent(query)}'));
+      Uri.parse('$_overpass?data=${Uri.encodeQueryComponent(query)}'),
+    );
     req.headers.set('User-Agent', 'rindo-gate-lines/1.0');
     final res = await req.close();
     final body = await res.transform(utf8.decoder).join();
@@ -117,4 +128,3 @@ Future<String?> _fetchWithRetry(
   }
   return null;
 }
-

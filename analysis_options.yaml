@@ -1,1 +1,17 @@
 include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  language:
+    # The feeds are undocumented JSON, parsed defensively. These make every
+    # implicit cast from dynamic an error, so a shape assumption has to be
+    # written down where it is made.
+    strict-casts: true
+    strict-raw-types: true
+
+linter:
+  rules:
+    # Timers, streams and fire-and-forget fetches are the app's bread and
+    # butter. These catch the ones that leak or drop their errors.
+    - cancel_subscriptions
+    - close_sinks
+    - unawaited_futures
