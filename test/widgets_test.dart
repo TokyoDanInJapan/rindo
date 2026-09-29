@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -18,6 +20,7 @@ import 'package:rindo/screens/radar_map/map_fab_stack.dart';
 import 'package:rindo/screens/radar_map/model_download_banner.dart';
 import 'package:rindo/screens/radar_map/radar_frame_controller.dart';
 import 'package:rindo/screens/radar_map/radar_legend.dart';
+import 'package:rindo/screens/radar_map/tile_pulse.dart';
 import 'package:rindo/screens/radar_map/radar_map_view.dart';
 import 'package:rindo/net/tile_status.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -37,6 +40,8 @@ Future<MapController> pumpMap(
   LatLng? pin,
   LatLng? rider,
   List<(LatLng, bool)>? places,
+  bool greyscale = false,
+  http.Client? tiles,
 }) async {
   final controller = MapController();
   final closures = ClosuresController(
@@ -74,10 +79,10 @@ Future<MapController> pumpMap(
       home: RadarMapView(
         mapController: controller,
         closures: closures,
-        httpClient: MockClient((_) async => http.Response('nf', 404)),
+        httpClient: tiles ?? MockClient((_) async => http.Response('nf', 404)),
         radar: radar,
         tileEpoch: 0,
-        greyscale: false,
+        greyscale: greyscale,
         initialCenter: const LatLng(35, 137),
         initialZoom: 10,
         onCameraGesture: () {},
@@ -689,6 +694,40 @@ void main() {
       expect(radarLevels(t), [10, 10]);
 
       await t.pump(const Duration(milliseconds: 300));
+    });
+  });
+
+  group('offscreen layers', () {
+    // Impeller on Vulkan aborts the app when it cannot allocate an offscreen
+    // texture for a nested layer, and the Pixel 10's PowerVR GPU runs out
+    // when a rotated or zoomed-out map has a layer per tile. The map must
+    // draw its greyscale, tile pulse, search disc and radar opacity with
+    // paint, never with a layer. See RadarMapView._pulsingTile.
+    testWidgets('the map adds no per-tile or map-sized layers', (t) async {
+      await pumpMap(
+        t,
+        rider: const LatLng(35, 137),
+        greyscale: true,
+        // Tiles that never arrive: every base tile stays loading, so each one
+        // shows the pulse and the greyscale tile together.
+        tiles: MockClient((_) => Completer<http.Response>().future),
+      );
+      await t.pump(const Duration(seconds: 1));
+
+      Finder inMap(Type type) => find.descendant(
+        of: find.byType(FlutterMap),
+        matching: find.byType(type),
+      );
+      expect(find.byType(TilePulse), findsWidgets, reason: 'tiles are loading');
+      expect(inMap(ColorFiltered), findsNothing);
+      expect(inMap(FadeTransition), findsNothing);
+      for (final o in t.widgetList<Opacity>(inMap(Opacity))) {
+        expect(
+          o.opacity,
+          anyOf(0.0, 1.0),
+          reason: 'a partial Opacity is a layer',
+        );
+      }
     });
   });
 

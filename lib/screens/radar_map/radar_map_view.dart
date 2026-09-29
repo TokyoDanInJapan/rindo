@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -98,12 +99,12 @@ class RadarMapView extends StatelessWidget {
       'https://server.arcgisonline.com/ArcGIS/rest/services/'
       'World_Street_Map/MapServer/tile/{z}/{y}/{x}';
 
-  static const _greyscaleMatrix = <double>[
+  static const _greyscale = ColorFilter.matrix(<double>[
     0.2126, 0.7152, 0.0722, 0, 0, //
     0.2126, 0.7152, 0.0722, 0, 0, //
     0.2126, 0.7152, 0.0722, 0, 0, //
     0, 0, 0, 1, 0,
-  ];
+  ]);
 
   // Built once, because the prefecture rings never change.
   static final _outline = [
@@ -160,9 +161,15 @@ class RadarMapView extends StatelessWidget {
   /// Base-map tile chrome: a pulse while the image is on its way, and a
   /// visible, tappable 'broken tile' placeholder when it failed. A blank spot
   /// is then diagnosable, as loading or as failed, and recoverable in place.
-  /// The greyscale filter is applied here, per tile, rather than around the
-  /// whole layer. ColorFiltered's saveLayer bounds miss parts of the
-  /// camera-transformed layer, which leaves unfiltered strips.
+  ///
+  /// The greyscale is drawn with the tile's own image paint, see [_greyTile].
+  /// Nothing here may add a compositing layer. Each layer is an offscreen
+  /// texture at the tile's full on-screen resolution, and a rotated or
+  /// zoomed-out map shows dozens of tiles. On Impeller's Vulkan backend that
+  /// ran the PowerVR GPU in the Pixel 10 out of image memory
+  /// (VK_ERROR_COMPRESSION_EXHAUSTED_EXT), and Impeller aborts the app when an
+  /// offscreen texture cannot be allocated. The old per-tile ColorFiltered,
+  /// and a FadeTransition for the loading pulse, were exactly such layers.
   Widget _pulsingTile(BuildContext context, Widget tile, TileImage image) {
     if (image.loadError) {
       return GestureDetector(
@@ -185,15 +192,27 @@ class RadarMapView extends StatelessWidget {
         ),
       );
     }
-    final t = greyscale
-        ? ColorFiltered(
-            colorFilter: const ColorFilter.matrix(_greyscaleMatrix),
-            child: tile,
-          )
-        : tile;
+    final t = greyscale ? _greyTile(image) : tile;
     if (image.loadFinishedAt != null) return t;
     return Stack(fit: StackFit.expand, children: [const TilePulse(), t]);
   }
+
+  /// The tile as flutter_map draws it, with its fade-in, but in greyscale.
+  ///
+  /// The colour matrix goes on the image paint itself. Impeller applies a
+  /// matrix filter on an image draw in the shader, with no offscreen texture.
+  /// A ColorFiltered around the tile needed a layer each, and so did a
+  /// BlendMode.saturation tint, which is an 'advanced' blend that Impeller
+  /// renders through a texture.
+  static Widget _greyTile(TileImage image) => CustomPaint(
+    size: Size.infinite,
+    painter: _FilteredImagePainter(
+      image: image.imageInfo?.image,
+      opacity: image.animation,
+      fixedOpacity: image.opacity,
+      filter: _greyscale,
+    ),
+  );
 
   /// Prefecture skeleton below the tiles, the base map, and the stacked radar
   /// frames. Only the active frame is visible.
@@ -259,19 +278,25 @@ class RadarMapView extends StatelessWidget {
           ),
         ],
       ),
-      // While closures for the area are loading, the disc pulses.
-      FadeTransition(
-        opacity: closures.pulseOpacity,
-        child: CircleLayer(
-          circles: [
-            CircleMarker(
-              point: center,
-              radius: radiusM,
-              useRadiusInMeter: true,
-              color: ringColor,
-            ),
-          ],
-        ),
+      // While closures for the area are loading, the disc pulses. The pulse
+      // animates the fill colour rather than a FadeTransition, which would be
+      // an offscreen layer the size of the map (see _pulsingTile).
+      AnimatedBuilder(
+        animation: closures.pulseOpacity,
+        builder: (context, _) {
+          final alpha = closures.pulseOpacity.value;
+          if (alpha == 0) return const SizedBox.shrink();
+          return CircleLayer(
+            circles: [
+              CircleMarker(
+                point: center,
+                radius: radiusM,
+                useRadiusInMeter: true,
+                color: ringColor.withValues(alpha: alpha),
+              ),
+            ],
+          );
+        },
       ),
     ];
   }
@@ -366,20 +391,20 @@ class RadarMapView extends StatelessWidget {
   /// opens a *centred* dialogue. flutter_map's RichAttributionWidget is not
   /// used, because its panel expands from the corner it lives in and slides
   /// underneath the button stack. A dialogue floats clear of everything. The
-  /// styling mirrors that widget's collapsed state: a half-opacity info icon,
-  /// inside SafeArea.
+  /// styling mirrors that widget's collapsed state: a half-strength info
+  /// icon, inside SafeArea.
   Widget _attribution(BuildContext context) => SafeArea(
     child: Align(
       alignment: Alignment.bottomRight,
       child: Padding(
         padding: const EdgeInsets.all(4),
-        child: Opacity(
-          opacity: 0.5,
-          child: IconButton(
-            tooltip: 'Map credits',
-            icon: const Icon(Icons.info_outlined),
-            onPressed: () => _showAttribution(context),
-          ),
+        // Half-strength colour rather than an Opacity, which would be an
+        // offscreen layer (see _pulsingTile).
+        child: IconButton(
+          tooltip: 'Map credits',
+          icon: const Icon(Icons.info_outlined),
+          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+          onPressed: () => _showAttribution(context),
         ),
       ),
     ),
@@ -600,13 +625,21 @@ class _RadarFrameLayersState extends State<_RadarFrameLayers> {
 
     // A plain Stack mirrors how FlutterMap lays out its own children, so
     // nesting the layers here changes nothing about their sizing.
+    //
+    // The 0.7 radar opacity goes on each tile's paint, not on an Opacity
+    // around the layer, which would be an offscreen layer the size of the map
+    // (see RadarMapView._pulsingTile). Per-tile opacity is safe here, because
+    // each layer is pinned to one native zoom, so no two of its tiles ever
+    // overlap. Opacity 1 and 0 add no layer: 1 paints the child as is, and 0
+    // skips it.
     return Stack(
       children: [
         for (final f in frames)
           if (_mountedFrames.contains(f.urlTemplate))
             Opacity(
-              opacity: identical(f, active) ? 0.7 : 0.0,
+              opacity: identical(f, active) ? 1.0 : 0.0,
               child: TileLayer(
+                tileDisplay: const TileDisplay.instantaneous(opacity: 0.7),
                 key: ValueKey('${f.urlTemplate}-${v.tileEpoch}-z$_native'),
                 urlTemplate: f.urlTemplate,
                 tileProvider: v._tileProvider(),
@@ -626,4 +659,45 @@ class _RadarFrameLayersState extends State<_RadarFrameLayers> {
       ],
     );
   }
+}
+
+/// Draws [image] to fill its box through [filter], faded by [opacity] (or by
+/// [fixedOpacity] when there is no animation). See RadarMapView._greyTile for
+/// why this paints the image itself rather than wrapping RawImage.
+class _FilteredImagePainter extends CustomPainter {
+  _FilteredImagePainter({
+    required this.image,
+    required this.opacity,
+    required this.fixedOpacity,
+    required this.filter,
+  }) : super(repaint: opacity);
+
+  final ui.Image? image;
+  final Animation<double>? opacity;
+  final double fixedOpacity;
+  final ColorFilter filter;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final image = this.image;
+    final alpha = opacity?.value ?? fixedOpacity;
+    if (image == null || alpha <= 0) return;
+    canvas.drawImageRect(
+      image,
+      Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
+      Offset.zero & size,
+      Paint()
+        // RawImage's default, which flutter_map's own tiles use.
+        ..filterQuality = FilterQuality.medium
+        ..colorFilter = filter
+        ..color = Color.fromRGBO(0, 0, 0, alpha),
+    );
+  }
+
+  @override
+  bool shouldRepaint(_FilteredImagePainter old) =>
+      old.image != image ||
+      old.opacity != opacity ||
+      old.fixedOpacity != fixedOpacity ||
+      old.filter != filter;
 }

@@ -1,3 +1,5 @@
+import 'dart:ui' show lerpDouble;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -13,11 +15,6 @@ class TilePulse extends StatefulWidget {
 }
 
 class _TilePulseState extends State<TilePulse> {
-  static final _opacity = Tween<double>(
-    begin: 0.06,
-    end: 0.25,
-  ).animate(_SharedPulse.instance);
-
   @override
   void initState() {
     super.initState();
@@ -30,11 +27,30 @@ class _TilePulseState extends State<TilePulse> {
     super.dispose();
   }
 
+  // A painted rectangle whose colour pulses, rather than a FadeTransition. A
+  // FadeTransition is an offscreen layer per loading tile, see
+  // RadarMapView._pulsingTile.
+  static final _painter = _PulsePainter();
+
   @override
-  Widget build(BuildContext context) => FadeTransition(
-    opacity: _opacity,
-    child: const ColoredBox(color: Colors.blueGrey),
-  );
+  Widget build(BuildContext context) =>
+      CustomPaint(painter: _painter, size: Size.infinite);
+}
+
+class _PulsePainter extends CustomPainter {
+  _PulsePainter() : super(repaint: _SharedPulse.instance);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final alpha = lerpDouble(0.06, 0.25, _SharedPulse.instance.value)!;
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()..color = Colors.blueGrey.withValues(alpha: alpha),
+    );
+  }
+
+  @override
+  bool shouldRepaint(_PulsePainter oldDelegate) => false;
 }
 
 /// One pulse for every loading tile. A zoom-out can have dozens of tiles in
