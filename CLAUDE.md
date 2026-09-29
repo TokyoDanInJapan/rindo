@@ -65,3 +65,24 @@ Release. **Build APK** runs on pushes to `main` and on pull requests, and
 produces a debug-signed artifact only. Release needs `KEYSTORE_BASE64` and
 `KEYSTORE_PASSWORD` in the repo's `release` *environment*. Repo secrets do
 not work – they resolve to empty strings.
+
+## No compositing layers inside the map
+
+Do not wrap anything inside `FlutterMap` in `Opacity` (other than 0 or 1),
+`ColorFiltered`, `FadeTransition`, `ShaderMask` or `BackdropFilter`. Draw
+the effect with paint instead: a colour on the paint, a colour matrix on an
+image paint, or `TileDisplay` opacity for tiles.
+
+Each of those widgets is an offscreen texture at full screen resolution,
+and a rotated or zoomed-out map repeats them per tile. On a Pixel 10
+(PowerVR GPU), Impeller's Vulkan backend runs out of image memory
+(`VK_ERROR_COMPRESSION_EXHAUSTED_EXT`) and then aborts the app on the next
+nested layer:
+
+```
+[FATAL:flutter/impeller/display_list/canvas.cc(1471)] Check failed: back_texture
+```
+
+0.1.5 crashed this way on zoom and rotation. The emulator renders with
+OpenGL ES and never shows it. The `offscreen layers` test in
+`test/widgets_test.dart` fails if a layer comes back.
