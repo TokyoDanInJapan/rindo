@@ -92,6 +92,11 @@ class TranslationController extends ChangeNotifier {
       if (!identical(raw, _source)) return; // superseded by a newer fetch
       _translated = out;
       _notify();
+    } catch (e) {
+      // Nobody awaits this future, so an error that left it would be an
+      // unhandled async error. The real translator never throws, but this
+      // must hold whatever it does. The originals stay on screen.
+      debugPrint('TranslationController: translation failed: $e');
     } finally {
       _inFlight--;
       _notify();
@@ -104,6 +109,7 @@ class TranslationController extends ChangeNotifier {
 
   @override
   void dispose() {
+    if (_disposed) return;
     _disposed = true;
     _translator.status.removeListener(_notify);
     _translator.dispose();

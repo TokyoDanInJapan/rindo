@@ -1,9 +1,10 @@
-import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
 import '../net/feed_exception.dart';
+import '../net/feed_fetch.dart';
 import 'feed_result.dart';
 import 'geojson.dart';
 import 'road_closure.dart';
@@ -30,6 +31,7 @@ class JarticSource {
   static const _base = 'https://www.jartic.or.jp/d/traffic_info/r1';
   final http.Client _client;
   final LastGood<String> _lastGood;
+  final _pool = FeedPool();
 
   JarticSource(this._client, {DateTime Function()? now})
     : _lastGood = LastGood(now: now);
@@ -56,16 +58,23 @@ class JarticSource {
     String? target;
     Object? targetError;
     try {
-      target = await _fetchTarget();
+      target = await _pool.run(_fetchTarget);
     } catch (e) {
       targetError = e;
     }
 
-    final results = await Future.wait(tiles.map((t) => _tileOrLast(target, t)));
+    final results = await Future.wait(
+      tiles.map(
+        (t) => _lastGood.fetchOr(
+          t,
+          target == null ? null : () => _pool.run(() => _fetchTile(target!, t)),
+        ),
+      ),
+    );
     var failed = 0;
     var fellBack = false;
     final out = <RoadClosure>[];
-    for (final (closures, fresh) in results) {
+    for (final (closures, fresh, _) in results) {
       if (!fresh) {
         failed++;
         fellBack |= closures != null;
@@ -86,82 +95,67 @@ class JarticSource {
     ]);
   }
 
-  /// One tile, freshly fetched, or else the last good copy. The flag says
-  /// which. Null closures means it failed with nothing to fall back on.
-  Future<(List<RoadClosure>?, bool)> _tileOrLast(
-    String? target,
-    String tile,
-  ) async {
-    if (target != null) {
-      try {
-        final fresh = await _fetchTile(target, tile);
-        _lastGood.put(tile, fresh);
-        return (fresh, true);
-      } catch (_) {
-        // Counted by the caller, and reported as a missing tile.
-      }
-    }
-    return (_lastGood.get(tile), false);
-  }
+  static FeedException _error(String message) =>
+      FeedException('JARTIC', message);
 
-  Future<String> _fetchTarget() async {
-    final r = await _client
-        .get(Uri.parse('$_base/target.json'))
-        .timeout(const Duration(seconds: 10));
-    if (r.statusCode != 200) {
-      throw FeedException('JARTIC', 'target ${r.statusCode}');
-    }
-    final doc = jsonDecode(r.body);
-    final target = doc is Map ? doc['target'] : null;
-    if (target is! String) {
-      throw FeedException('JARTIC', 'target: unexpected shape');
-    }
-    return target;
-  }
+  Future<String> _fetchTarget() => fetchFeedJson<String>(
+    _client,
+    Uri.parse('$_base/target.json'),
+    deadline: const Duration(seconds: 10),
+    resource: 'target',
+    error: _error,
+    select: (doc) => doc is Map ? doc['target'] : null,
+  );
 
   /// One prefecture tile. It throws when the tile cannot be read, so the
   /// caller can fall back. A 404 is a tile JARTIC does not publish, which is
   /// an empty tile rather than a failure.
-  Future<List<RoadClosure>> _fetchTile(String target, String tile) async {
-    final r = await _client
-        .get(Uri.parse('$_base/$target/d/301/$tile.json'))
-        .timeout(const Duration(seconds: 15));
-    if (r.statusCode == 404) return const [];
-    if (r.statusCode != 200) {
-      throw FeedException('JARTIC', '$tile ${r.statusCode}');
-    }
-    // Decode the bytes as UTF-8 explicitly. package:http falls back to
-    // Latin-1 when the server omits a charset, which mangles Japanese text.
-    final doc = jsonDecode(utf8.decode(r.bodyBytes));
-    final features = doc is Map ? doc['features'] : null;
-    if (features is! List) {
-      throw FeedException('JARTIC', '$tile: unexpected shape');
-    }
+  Future<List<RoadClosure>> _fetchTile(String target, String tile) => fetchFeed(
+    _client,
+    Uri.parse('$_base/$target/d/301/$tile.json'),
+    deadline: const Duration(seconds: 15),
+    resource: tile,
+    error: _error,
+    onNotFound: () => <RoadClosure>[],
+    parse: (bytes) => _parseTileBytes(bytes, tile),
+  );
 
-    final out = <RoadClosure>[];
-    for (final f in features) {
-      try {
-        final c = _parseFeature(f, tile);
-        if (c != null) out.add(c);
-      } catch (_) {
-        // One malformed feature must not discard the rest of the tile.
-      }
-    }
-    return out;
+  // This static boundary keeps the isolate callback free of the source/client.
+  static Future<List<RoadClosure>> _parseTileBytes(
+    Uint8List bytes,
+    String tile,
+  ) => parseFeedBytes(bytes, (bytes) => _parseTile(bytes, tile));
+
+  static List<RoadClosure> _parseTile(Uint8List bytes, String tile) {
+    final features = decodeFeedJson<List<dynamic>>(
+      bytes,
+      resource: tile,
+      error: _error,
+      select: (doc) => doc is Map ? doc['features'] : null,
+    );
+    return parseFeedRecords(
+      features,
+      (feature) => _parseFeature(feature, tile),
+      resource: tile,
+      error: _error,
+    );
   }
 
-  RoadClosure? _parseFeature(dynamic f, String tile) {
-    if (f is! Map) return null;
+  static RoadClosure? _parseFeature(dynamic f, String tile) {
+    if (f is! Map) throw const FormatException('feature is not an object');
     final props = f['properties'];
-    if (props is! Map) return null;
+    if (props is! Map) throw const FormatException('missing properties');
 
     // Only impassable regulations: cs '01' is JARTIC's full-closure code.
+    if (props['cs'] is! String && props['rd'] is! String) {
+      throw const FormatException('missing regulation');
+    }
     final rd = props['rd'] as String? ?? '';
     if (props['cs'] != '01' && !rd.contains('通行止')) return null;
 
     final lines = geometryLines(f['geometry']);
     final point = _representativePoint(props['p'], lines);
-    if (point == null) return null;
+    if (point == null) throw const FormatException('missing closure point');
 
     final pref = tile.substring(1, 3); // "R13" / "R01_2" -> "13" / "01"
     return RoadClosure(
@@ -182,7 +176,7 @@ class JarticSource {
     );
   }
 
-  String? _section(Map<dynamic, dynamic> props) {
+  static String? _section(Map<dynamic, dynamic> props) {
     final i = (props['i'] as String?)?.trim();
     final d = (props['d'] as String?)?.trim();
     if (i == null || i.isEmpty) return null;
@@ -191,7 +185,7 @@ class JarticSource {
 
   /// `p` holds one or more representative points as GeoJSON positions. When
   /// `p` is absent, fall back to the start of the regulated segment.
-  LatLng? _representativePoint(dynamic p, List<List<LatLng>> lines) {
+  static LatLng? _representativePoint(dynamic p, List<List<LatLng>> lines) {
     final pts = latLngLine(p);
     if (pts.isNotEmpty) return pts.first;
     if (lines.isNotEmpty && lines.first.isNotEmpty) return lines.first.first;

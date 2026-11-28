@@ -154,4 +154,28 @@ void main() {
     }
     expect(m.isOffline, isFalse);
   });
+
+  test('after dispose every entry point is a no-op and arms no timer', () {
+    fakeAsync((async) {
+      final late = ConnectivityMonitor(now: () => clock.now);
+      // An outage in progress, so that heal() would have work to do.
+      for (var i = 0; i < 3; i++) {
+        late.recordTileError(_sockErr);
+      }
+      final epoch = late.tileEpoch;
+      late.dispose();
+
+      // Tile errors keep arriving while the screen's clients close.
+      for (var i = 0; i < 5; i++) {
+        late.recordTileError(_sockErr);
+      }
+      expect(late.heal(), isFalse);
+      late.bumpEpoch();
+      late.dismissOffline();
+      expect(late.tileEpoch, epoch);
+      expect(async.pendingTimers, isEmpty);
+      // Nothing left to fire into the disposed notifier.
+      async.elapse(const Duration(minutes: 1));
+    });
+  });
 }

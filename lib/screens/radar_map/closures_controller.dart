@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -88,7 +89,12 @@ class ClosuresController extends ChangeNotifier {
   }
 
   // ---- search area
-  LatLng? _rider;
+
+  // The GPS fix is a listenable of its own, apart from this notifier. A fix
+  // arrives about once a second while riding, and a notification here
+  // rebuilds the whole screen. Only the rider dot and the search ring follow
+  // the fix, so they listen to this instead.
+  final _rider = ValueNotifier<LatLng?>(null);
   LatLng? _pin;
   List<LatLng>? _route;
   CorridorArea? _corridor; // built once per route, see [CorridorArea]
@@ -98,7 +104,11 @@ class ClosuresController extends ChangeNotifier {
   // answered a question nobody is asking any more, so it is dropped.
   int _areaGeneration = 0;
 
-  LatLng? get rider => _rider;
+  LatLng? get rider => _rider.value;
+
+  /// The rider's GPS fix, for the layers that move with it. It changes
+  /// without a notification from this controller, except on the first fix.
+  ValueListenable<LatLng?> get riderPosition => _rider;
   LatLng? get pin => _pin;
   List<LatLng>? get route => _route;
   bool get pinned => _pin != null;
@@ -106,7 +116,7 @@ class ClosuresController extends ChangeNotifier {
 
   /// Point mode search centre: the pin wins over the GPS fix. It is null in
   /// route mode, because the corridor has no single centre.
-  LatLng? get searchCenter => _pin ?? _rider;
+  LatLng? get searchCenter => _pin ?? rider;
 
   /// Centre for the per-item distances in the list and detail views. It is
   /// null in route mode, where a distance from a point would mislead.
@@ -149,10 +159,14 @@ class ClosuresController extends ChangeNotifier {
   /// first fix, so that closures load immediately. The screen still owns
   /// camera-follow.
   void setRider(LatLng fix) {
-    final first = _rider == null;
-    _rider = fix;
-    _notify();
-    refresh(force: first);
+    if (_disposed) return;
+    final first = rider == null;
+    _rider.value = fix;
+    // The first fix is what gives the screen a position at all, so tell it.
+    // Later fixes reach only the [riderPosition] listeners, and the refresh
+    // notifies by itself if it actually fetches.
+    if (first) _notify();
+    unawaited(refresh(force: first));
   }
 
   void dropPin(LatLng where) {
@@ -206,6 +220,8 @@ class ClosuresController extends ChangeNotifier {
   /// [freshFor]. A fetch where a source failed is fresh only for
   /// [retryPartialAfter]. A loaded route replaces the point query with its
   /// corridor, where only age and force apply, because the route is static.
+  /// The rider's movement along it must not count, or every GPS fix in route
+  /// mode refetched every feed along the whole corridor.
   ///
   /// A refresh asked for mid-fetch is queued, not dropped. A pin dropped while
   /// the rider's closures were loading must still load the pin's.
@@ -218,9 +234,12 @@ class ClosuresController extends ChangeNotifier {
       _queuedForce = (_queuedForce ?? false) || force;
       return;
     }
-    final movedKm = corridor != null || _fetchedAt == null
-        ? double.infinity
-        : const Distance().as(LengthUnit.Kilometer, _fetchedAt!, center!);
+    // Point mode only. The corridor does not move with the rider.
+    final moved =
+        corridor == null &&
+        (_fetchedAt == null ||
+            const Distance().as(LengthUnit.Kilometer, _fetchedAt!, center!) >=
+                refetchAfterKm);
     final age = _fetchedTime == null
         ? const Duration(days: 1)
         : _now().difference(_fetchedTime!);
@@ -231,7 +250,7 @@ class ClosuresController extends ChangeNotifier {
             retryPartialAfter * (1 << (_partialStreak - 1).clamp(0, 6)),
             freshFor,
           );
-    if (!force && movedKm < refetchAfterKm && age < freshness) return;
+    if (!force && !moved && age < freshness) return;
 
     final generation = _areaGeneration;
     _loading = true;
@@ -288,6 +307,7 @@ class ClosuresController extends ChangeNotifier {
     _disposed = true;
     translation.removeListener(_notify);
     translation.dispose();
+    _rider.dispose();
     _pulseCurve.dispose();
     pulse.dispose();
     super.dispose();

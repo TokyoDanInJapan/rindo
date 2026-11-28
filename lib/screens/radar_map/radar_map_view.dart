@@ -21,7 +21,11 @@ import 'tile_pulse.dart';
 /// and markers, the rider and pin markers, and the attribution. It reads the
 /// [ClosuresController] for the search area and the closures. The screen owns
 /// the camera and the wiring.
-class RadarMapView extends StatelessWidget {
+///
+/// The screen rebuilds this on every closures, translation or connectivity
+/// change, so the state keeps the layers whose inputs did not change and hands
+/// flutter_map the identical widgets again. See [_RadarMapViewState].
+class RadarMapView extends StatefulWidget {
   final MapController mapController;
   final ClosuresController closures;
 
@@ -106,15 +110,23 @@ class RadarMapView extends StatelessWidget {
     0, 0, 0, 1, 0,
   ]);
 
-  // Built once, because the prefecture rings never change.
-  static final _outline = [
-    for (final ring in japanOutline)
-      Polyline(
-        points: ring,
-        color: Colors.blueGrey.withValues(alpha: 0.55),
-        strokeWidth: 1,
-      ),
-  ];
+  // One widget for the life of the app, because the prefecture rings never
+  // change. It must be the same *instance* on every build, not just equal
+  // polylines. flutter_map's polyline layer clears its projection and
+  // simplification caches in every didUpdateWidget, so a fresh PolylineLayer
+  // per screen rebuild re-projected all ~30,000 outline points, about once a
+  // second while riding. Flutter skips the update for an identical widget, so
+  // the caches survive.
+  static final _outlineLayer = PolylineLayer(
+    polylines: [
+      for (final ring in japanOutline)
+        Polyline(
+          points: ring,
+          color: Colors.blueGrey.withValues(alpha: 0.55),
+          strokeWidth: 1,
+        ),
+    ],
+  );
 
   // Explicit provider for every tile layer. This controls the client and,
   // crucially, disables flutter_map 8's process-wide built-in cache singleton.
@@ -133,21 +145,59 @@ class RadarMapView extends StatelessWidget {
   );
 
   @override
+  State<RadarMapView> createState() => _RadarMapViewState();
+}
+
+/// Builds the map and keeps the layers that are expensive to update.
+///
+/// A rebuild of the screen used to rebuild every layer. For the polyline
+/// layers that meant re-projecting every point, see [RadarMapView._outlineLayer], and for the closures it meant a new marker widget per closure. The
+/// layers that depend only on the closures list are therefore rebuilt only
+/// when that list changes, and the rider's own layers listen to
+/// [ClosuresController.riderPosition], so a GPS fix moves the dot without
+/// rebuilding anything else.
+class _RadarMapViewState extends State<RadarMapView> {
+  // Closure lines and markers, and the list they were built from. The list is
+  // replaced, never mutated, when a fetch or a translation lands, so an
+  // identity check is enough.
+  List<RoadClosure>? _shownFor;
+  Widget? _closureLines;
+  Widget? _closureMarkers;
+
+  // The colours also depend on the time: a scheduled closure changes colour
+  // when its window opens. That moment is the earliest future validFrom in
+  // the list. The layers are rebuilt once it has passed, and a timer makes
+  // sure a build happens then, because the screen may not rebuild by itself.
+  DateTime? _nextFlip;
+  Timer? _flipTimer;
+
+  // The GPX track layer, for the same reason: thousands of points that would
+  // otherwise be re-projected on every rebuild.
+  List<LatLng>? _routeFor;
+  Widget? _routeLayer;
+
+  @override
+  void dispose() {
+    _flipTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return FlutterMap(
-      mapController: mapController,
+      mapController: widget.mapController,
       options: MapOptions(
-        initialCenter: initialCenter,
-        initialZoom: initialZoom,
+        initialCenter: widget.initialCenter,
+        initialZoom: widget.initialZoom,
         minZoom: 5,
         maxZoom: 17,
         onPositionChanged: (camera, hasGesture) {
-          if (hasGesture) onCameraGesture();
+          if (hasGesture) widget.onCameraGesture();
         },
         // Long-press drops a scouting pin. Closures then load around the pin
         // instead of around the GPS fix. Tap the pin or the locate button to
         // go back.
-        onLongPress: (_, latLng) => onLongPress(latLng),
+        onLongPress: (_, latLng) => widget.onLongPress(latLng),
       ),
       children: [
         ..._baseAndRadar(),
@@ -173,7 +223,7 @@ class RadarMapView extends StatelessWidget {
   Widget _pulsingTile(BuildContext context, Widget tile, TileImage image) {
     if (image.loadError) {
       return GestureDetector(
-        onTap: onRetryTiles,
+        onTap: widget.onRetryTiles,
         child: Container(
           decoration: BoxDecoration(
             color: Colors.blueGrey.withValues(alpha: 0.10),
@@ -192,7 +242,7 @@ class RadarMapView extends StatelessWidget {
         ),
       );
     }
-    final t = greyscale ? _greyTile(image) : tile;
+    final t = widget.greyscale ? _greyTile(image) : tile;
     if (image.loadFinishedAt != null) return t;
     return Stack(fit: StackFit.expand, children: [const TilePulse(), t]);
   }
@@ -210,7 +260,7 @@ class RadarMapView extends StatelessWidget {
       image: image.imageInfo?.image,
       opacity: image.animation,
       fixedOpacity: image.opacity,
-      filter: _greyscale,
+      filter: RadarMapView._greyscale,
     ),
   );
 
@@ -220,20 +270,24 @@ class RadarMapView extends StatelessWidget {
     // The skeleton sits BELOW the tile layers, so it shows only where opaque
     // map tiles have not painted yet, either still loading or unreachable
     // offline. It disappears as those tiles arrive.
-    PolylineLayer(polylines: _outline),
+    RadarMapView._outlineLayer,
     TileLayer(
-      key: ValueKey('base-$tileEpoch-${closures.english}'),
-      urlTemplate: closures.english ? _esriUrl : _cyclosmUrl,
-      tileProvider: _tileProvider(),
+      key: ValueKey('base-${widget.tileEpoch}-${widget.closures.english}'),
+      urlTemplate: widget.closures.english
+          ? RadarMapView._esriUrl
+          : RadarMapView._cyclosmUrl,
+      tileProvider: widget._tileProvider(),
       // Only used where the template has an {s} (CyclOSM).
       subdomains: const ['a', 'b', 'c'],
-      userAgentPackageName: _userAgent,
+      userAgentPackageName: RadarMapView._userAgent,
       maxNativeZoom: 19,
       // A fresh instance per layer. These transformers hold per-stream timer
       // state, so a shared static would cross-wire the layers' debounce
       // clocks.
-      tileUpdateTransformer: TileUpdateTransformers.debounce(_settleDelay),
-      errorTileCallback: (t, e, st) => onTileError('base', t, e, st),
+      tileUpdateTransformer: TileUpdateTransformers.debounce(
+        RadarMapView._settleDelay,
+      ),
+      errorTileCallback: (t, e, st) => widget.onTileError('base', t, e, st),
       // Base map only: the radar layers are transparent overlays, where a
       // pulse would paint grey over perfectly loaded map.
       tileBuilder: _pulsingTile,
@@ -241,16 +295,19 @@ class RadarMapView extends StatelessWidget {
     // All frames stay mounted so that their tiles pre-load and the animation
     // never flickers. Only the active frame is visible. A 404 from JMA means
     // 'no rain in this tile' and simply renders as nothing.
-    _RadarFrameLayers(view: this),
+    _RadarFrameLayers(view: widget),
   ];
 
   /// The loaded GPX track. In point mode, the search ring plus its loading
-  /// pulse instead.
+  /// pulse instead. The ring follows the rider, so in point mode it rebuilds
+  /// on [ClosuresController.riderPosition] alone.
   List<Widget> _searchOverlay() {
+    final closures = widget.closures;
     final route = closures.route;
     if (route != null) {
-      return [
-        PolylineLayer(
+      if (!identical(route, _routeFor)) {
+        _routeFor = route;
+        _routeLayer = PolylineLayer(
           polylines: [
             Polyline(
               points: route,
@@ -258,34 +315,46 @@ class RadarMapView extends StatelessWidget {
               strokeWidth: 4,
             ),
           ],
-        ),
-      ];
+        );
+      }
+      return [_routeLayer!];
     }
-    final center = closures.searchCenter;
-    if (center == null) return const [];
-    final ringColor = closures.pinned ? Colors.teal : Colors.blueGrey;
+    _routeFor = _routeLayer = null;
+    final pinned = closures.pinned;
+    final ringColor = pinned ? Colors.teal : Colors.blueGrey;
     const radiusM = ClosuresController.pointRadiusKm * 1000;
     return [
-      CircleLayer(
-        circles: [
-          CircleMarker(
-            point: center,
-            radius: radiusM,
-            useRadiusInMeter: true,
-            color: Colors.transparent,
-            borderColor: ringColor.withValues(alpha: 0.45),
-            borderStrokeWidth: closures.pinned ? 2.5 : 1.5,
-          ),
-        ],
+      ValueListenableBuilder<LatLng?>(
+        valueListenable: closures.riderPosition,
+        builder: (context, _, _) {
+          final center = closures.searchCenter;
+          if (center == null) return const SizedBox.shrink();
+          return CircleLayer(
+            circles: [
+              CircleMarker(
+                point: center,
+                radius: radiusM,
+                useRadiusInMeter: true,
+                color: Colors.transparent,
+                borderColor: ringColor.withValues(alpha: 0.45),
+                borderStrokeWidth: pinned ? 2.5 : 1.5,
+              ),
+            ],
+          );
+        },
       ),
       // While closures for the area are loading, the disc pulses. The pulse
       // animates the fill colour rather than a FadeTransition, which would be
       // an offscreen layer the size of the map (see _pulsingTile).
       AnimatedBuilder(
-        animation: closures.pulseOpacity,
+        animation: Listenable.merge([
+          closures.pulseOpacity,
+          closures.riderPosition,
+        ]),
         builder: (context, _) {
           final alpha = closures.pulseOpacity.value;
-          if (alpha == 0) return const SizedBox.shrink();
+          final center = closures.searchCenter;
+          if (alpha == 0 || center == null) return const SizedBox.shrink();
           return CircleLayer(
             circles: [
               CircleMarker(
@@ -302,13 +371,23 @@ class RadarMapView extends StatelessWidget {
   }
 
   /// Regulated road segments, closure markers, and the rider and pin markers.
+  ///
+  /// The closure layers are kept from the last build until the list changes
+  /// or a scheduled closure opens, see [_shownFor] and [_nextFlip]. Their taps
+  /// read [widget] when they fire, so a kept marker still calls the current
+  /// callbacks.
   List<Widget> _closureLayers() {
-    final now = DateTime.now();
+    final closures = widget.closures;
     final shown = closures.shown;
-    final rider = closures.rider;
-    final pin = closures.pin;
-    return [
-      PolylineLayer(
+    final now = DateTime.now();
+    final flipped = _nextFlip != null && !now.isBefore(_nextFlip!);
+    if (!identical(shown, _shownFor) || flipped) {
+      _shownFor = shown;
+      _scheduleFlip(shown, now);
+      // Keyed, so that the route overlay coming or going above them, which
+      // changes how many layers precede them, does not remount them.
+      _closureLines = PolylineLayer(
+        key: const ValueKey('closure-lines'),
         polylines: [
           for (final c in shown)
             for (final line in c.lines)
@@ -319,8 +398,9 @@ class RadarMapView extends StatelessWidget {
                   strokeWidth: 5,
                 ),
         ],
-      ),
-      MarkerLayer(
+      );
+      _closureMarkers = MarkerLayer(
+        key: const ValueKey('closure-markers'),
         markers: [
           for (final c in shown)
             Marker(
@@ -328,7 +408,7 @@ class RadarMapView extends StatelessWidget {
               width: 36,
               height: 36,
               child: GestureDetector(
-                onTap: () => onShowDetail(c),
+                onTap: () => widget.onShowDetail(c),
                 child: Icon(
                   closureIcon(c),
                   color: closureColor(c, now),
@@ -337,35 +417,58 @@ class RadarMapView extends StatelessWidget {
                 ),
               ),
             ),
-          if (rider != null)
-            Marker(
-              point: rider,
-              // Twice the dot's size. The visible dot stays 22 px, because it
-              // marks a position and a bigger one would claim precision the
-              // fix does not have. But a 22 px tap target on a moving bike is
-              // no target at all, so the transparent surround takes the tap.
-              width: 44,
-              height: 44,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => onShowPlace(rider, pinned: false),
-                child: Center(
-                  child: SizedBox(
-                    width: 22,
-                    height: 22,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.blue.shade600,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 3),
-                        boxShadow: const [BoxShadow(blurRadius: 6)],
+        ],
+      );
+    }
+    final pin = closures.pin;
+    return [
+      _closureLines!,
+      _closureMarkers!,
+      // The rider dot moves with every GPS fix, so it has a layer of its own
+      // that rebuilds on the position alone.
+      ValueListenableBuilder<LatLng?>(
+        key: const ValueKey('rider'),
+        valueListenable: closures.riderPosition,
+        builder: (context, rider, _) {
+          if (rider == null) return const SizedBox.shrink();
+          return MarkerLayer(
+            markers: [
+              Marker(
+                point: rider,
+                // Twice the dot's size. The visible dot stays 22 px, because
+                // it marks a position and a bigger one would claim precision
+                // the fix does not have. But a 22 px tap target on a moving
+                // bike is no target at all, so the transparent surround takes
+                // the tap.
+                width: 44,
+                height: 44,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => widget.onShowPlace(rider, pinned: false),
+                  child: Center(
+                    child: SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.blue.shade600,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 3),
+                          boxShadow: const [BoxShadow(blurRadius: 6)],
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ),
-          if (pin != null)
+            ],
+          );
+        },
+      ),
+      if (pin != null)
+        MarkerLayer(
+          key: const ValueKey('pin'),
+          markers: [
             Marker(
               point: pin,
               width: 44,
@@ -373,7 +476,7 @@ class RadarMapView extends StatelessWidget {
               // Bottom tip of the glyph sits on the pinned spot.
               alignment: Alignment.topCenter,
               child: GestureDetector(
-                onTap: () => onShowPlace(pin, pinned: true),
+                onTap: () => widget.onShowPlace(pin, pinned: true),
                 child: Icon(
                   Icons.place,
                   color: Colors.teal.shade700,
@@ -382,9 +485,29 @@ class RadarMapView extends StatelessWidget {
                 ),
               ),
             ),
-        ],
-      ),
+          ],
+        ),
     ];
+  }
+
+  void _scheduleFlip(List<RoadClosure> shown, DateTime now) {
+    DateTime? next;
+    for (final c in shown) {
+      final from = c.validFrom;
+      if (from != null &&
+          now.isBefore(from) &&
+          (next == null || from.isBefore(next))) {
+        next = from;
+      }
+    }
+    _nextFlip = next;
+    _flipTimer?.cancel();
+    _flipTimer = next == null
+        ? null
+        // A second late, so that the build is past the boundary for certain.
+        : Timer(next.difference(now) + const Duration(seconds: 1), () {
+            if (mounted) setState(() {});
+          });
   }
 
   /// The mandatory data credits: the standard low-key (i) in the corner, which
@@ -420,7 +543,7 @@ class RadarMapView extends StatelessWidget {
         '© OpenStreetMap contributors',
         Uri.parse('https://www.openstreetmap.org/copyright'),
       ),
-      if (closures.english)
+      if (widget.closures.english)
         (
           // Esri's terms want the data providers credited, not just the
           // product. This is their standard string for World Street Map.
@@ -438,7 +561,7 @@ class RadarMapView extends StatelessWidget {
           'CyclOSM · tiles hosted by OpenStreetMap France',
           Uri.parse('https://www.cyclosm.org'),
         ),
-      (closures.attribution, closures.attributionUrl),
+      (widget.closures.attribution, widget.closures.attributionUrl),
     ];
     showDialog<void>(
       context: context,
@@ -447,7 +570,7 @@ class RadarMapView extends StatelessWidget {
         children: [
           for (final (label, url) in entries)
             SimpleDialogOption(
-              onPressed: () => onOpenUrl(url),
+              onPressed: () => widget.onOpenUrl(url),
               child: Text(label),
             ),
           const Divider(),
@@ -617,11 +740,21 @@ class _RadarFrameLayersState extends State<_RadarFrameLayers> {
       _generation = gen;
       _mountedFrames.clear();
       _preload?.cancel();
-      _preload = frames.length > 1
-          ? Timer.periodic(_preloadInterval, (_) => _mountNextFrame())
-          : null;
+      _preload = null;
     }
     if (active != null) _mountedFrames.add(active.urlTemplate);
+    // Keep preloading while any frame is still unmounted. This is checked on
+    // every build rather than only on a new generation, because a frame set
+    // can grow without its first frame changing. When the forecast index
+    // failed once, the set is just the observed frames. When it answers on a
+    // later load, the forecast frames join behind the same first frame, so
+    // the generation stays the same, and the timer had already stopped. They
+    // would then mount only as playback reached them, each one fetching its
+    // grid while it is on screen.
+    if (_preload == null &&
+        frames.any((f) => !_mountedFrames.contains(f.urlTemplate))) {
+      _preload = Timer.periodic(_preloadInterval, (_) => _mountNextFrame());
+    }
 
     // A plain Stack mirrors how FlutterMap lays out its own children, so
     // nesting the layers here changes nothing about their sizing.
@@ -636,7 +769,14 @@ class _RadarFrameLayersState extends State<_RadarFrameLayers> {
       children: [
         for (final f in frames)
           if (_mountedFrames.contains(f.urlTemplate))
+            // The key goes on the Opacity, the Stack's direct child. Keyed
+            // only on the TileLayer inside, the layers were matched by
+            // position. A preload that mounted a frame *ahead of* the active
+            // one then shifted the active layer down one slot, and Flutter
+            // rebuilt it from scratch, which cancelled every tile it had in
+            // flight.
             Opacity(
+              key: ValueKey('${f.urlTemplate}-${v.tileEpoch}-z$_native'),
               opacity: identical(f, active) ? 1.0 : 0.0,
               child: TileLayer(
                 tileDisplay: const TileDisplay.instantaneous(opacity: 0.7),

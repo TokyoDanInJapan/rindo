@@ -56,6 +56,7 @@ class RoadClosure {
       ? ClosureStatus.scheduled
       : ClosureStatus.active;
 
-  double distanceKmFrom(LatLng from) =>
-      const Distance().as(LengthUnit.Kilometer, from, point);
+  double distanceKmFrom(LatLng from) => const Distance(
+    calculator: Haversine(),
+  ).as(LengthUnit.Kilometer, from, point);
 }

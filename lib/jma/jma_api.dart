@@ -1,8 +1,7 @@
-import 'dart:convert';
-
 import 'package:http/http.dart' as http;
 
 import '../net/feed_exception.dart';
+import '../net/feed_fetch.dart';
 
 /// Direct client for JMA's undocumented nowcast endpoints. These are the same
 /// ones that power https://www.jma.go.jp/bosai/nowc/, ported from
@@ -120,14 +119,13 @@ class JmaApi {
     String url, {
     required bool observedOnly,
   }) async {
-    final r = await _client
-        .get(Uri.parse(url))
-        .timeout(const Duration(seconds: 10));
-    if (r.statusCode != 200) {
-      throw JmaException('targetTimes ${r.statusCode}');
-    }
-    final raw = jsonDecode(utf8.decode(r.bodyBytes));
-    if (raw is! List) throw JmaException('targetTimes: unexpected shape');
+    final raw = await fetchFeedJson<List<dynamic>>(
+      _client,
+      Uri.parse(url),
+      deadline: const Duration(seconds: 10),
+      resource: 'targetTimes',
+      error: JmaException.new,
+    );
 
     final pairs = <_TimePair>[];
     for (final t in raw) {

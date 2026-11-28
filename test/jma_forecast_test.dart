@@ -172,6 +172,15 @@ void main() {
       expect(a.municipality, isNotEmpty);
     });
 
+    test('nearest municipality distance respects the caller radius', () {
+      final area = forecastAreaFor(_inChiba)!;
+      expect(
+        forecastAreaFor(_inChiba, maxKm: area.km + 0.001)!.municipality,
+        area.municipality,
+      );
+      expect(forecastAreaFor(_inChiba, maxKm: area.km - 0.001), isNull);
+    });
+
     test('handles the offices that are not just the JIS code + 0000', () {
       // Sapporo: Hokkaido is split seven ways, so 010000 doesn't exist.
       expect(forecastAreaFor(const LatLng(43.062, 141.354))!.office, '016000');
@@ -291,6 +300,29 @@ void main() {
         final r = await JmaForecastApi(client: client).fetch(_inChiba);
         expect(r.days, isNotEmpty, reason: 'the detailed forecast still works');
         expect(r.week, isEmpty);
+      },
+    );
+
+    test(
+      'unexpected overview shape retains its URL and forecast label',
+      () async {
+        final client = MockClient(
+          (request) async => request.url.path.contains('overview_forecast')
+              ? http.Response('[]', 200)
+              : http.Response.bytes(utf8.encode(_forecastJson()), 200),
+        );
+        await expectLater(
+          JmaForecastApi(client: client).fetch(_inChiba),
+          throwsA(
+            isA<JmaForecastException>()
+                .having((e) => e.source, 'source', 'JMA forecast')
+                .having(
+                  (e) => e.message,
+                  'message',
+                  '$jmaForecastBase/overview_forecast/120000.json: unexpected shape',
+                ),
+          ),
+        );
       },
     );
 

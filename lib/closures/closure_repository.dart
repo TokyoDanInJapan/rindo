@@ -88,18 +88,19 @@ class ClosureRepository {
     final now = _now();
     final kept = [
       for (final s in seasonal)
-        if (s.statusAt(now) == ClosureStatus.active) s,
+        if (s.statusAt(now) == ClosureStatus.active) (s, _routeKey(s.roadName)),
     ];
 
     final out = [...seasonal];
     for (final m in mlit) {
-      if (!debugIsDuplicate(m, kept)) {
+      final key = _routeKey(m.roadName);
+      if (!_isDuplicate(m, key, kept)) {
         out.add(m);
-        kept.add(m);
+        kept.add((m, key));
       }
     }
     for (final j in jartic) {
-      if (!debugIsDuplicate(j, kept)) out.add(j);
+      if (!_isDuplicate(j, _routeKey(j.roadName), kept)) out.add(j);
     }
     return out;
   }
@@ -119,25 +120,28 @@ class ClosureRepository {
   }
 
   @visibleForTesting
-  bool debugIsDuplicate(RoadClosure candidate, List<RoadClosure> kept) {
-    const dist = Distance();
+  bool debugIsDuplicate(RoadClosure candidate, List<RoadClosure> kept) =>
+      _isDuplicate(candidate, _routeKey(candidate.roadName), [
+        for (final closure in kept) (closure, _routeKey(closure.roadName)),
+      ]);
+
+  bool _isDuplicate(
+    RoadClosure candidate,
+    (String, String)? key,
+    List<(RoadClosure, (String, String)?)> kept,
+  ) {
+    if (key == null) return false;
+    const dist = Distance(calculator: Haversine());
     return kept.any(
-      (m) =>
-          _sameRoad(m.roadName, candidate.roadName) &&
-          dist.as(LengthUnit.Kilometer, m.point, candidate.point) < 5,
+      (entry) =>
+          key == entry.$2 &&
+          dist.as(LengthUnit.Kilometer, entry.$1.point, candidate.point) < 5,
     );
   }
 
-  /// Same route class and number? The digits are normalised, because JARTIC
-  /// serves full-width '国道１６号' against MLIT's '国道16号'. 都道, 道道, 府道
-  /// and 県道 count as one class. A cross-border prefectural road keeps its
-  /// number on both sides of the border, and the 5 km proximity test already
-  /// rules out same-numbered roads in unrelated prefectures.
-  bool _sameRoad(String a, String b) {
-    final ka = _routeKey(a), kb = _routeKey(b);
-    return ka != null && ka == kb;
-  }
-
+  // Normalise each closure's route key once per merge, before the pairwise
+  // proximity checks. National and prefectural roads remain separate classes;
+  // 都道, 道道, 府道 and 県道 share a class across prefectural borders.
   static final _routeRe = RegExp(r'(国道|都道|道道|府道|県道)(\d+)号');
   static final _fullWidthDigit = RegExp(r'[０-９]');
 

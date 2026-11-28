@@ -31,6 +31,25 @@ class LastGood<K> {
   void put(K key, List<RoadClosure> closures) =>
       _entries[key] = (_now(), closures);
 
+  /// Fetch and remember a part, or serve its unexpired last-good copy. A null
+  /// fetch means its discovery index failed, so there is no URL to request.
+  /// Keep the cause for sources whose problem line includes the failure text.
+  Future<(List<RoadClosure>?, bool, Object?)> fetchOr(
+    K key,
+    Future<List<RoadClosure>> Function()? fetch,
+  ) async {
+    if (fetch != null) {
+      try {
+        final fresh = await fetch();
+        put(key, fresh);
+        return (fresh, true, null);
+      } catch (error) {
+        return (get(key), false, error);
+      }
+    }
+    return (get(key), false, null);
+  }
+
   /// The last good closures for [key], or null if there are none young enough.
   List<RoadClosure>? get(K key) {
     final entry = _entries[key];

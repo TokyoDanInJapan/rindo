@@ -1,9 +1,8 @@
-import 'dart:convert';
-
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
 import '../net/feed_exception.dart';
+import '../net/feed_fetch.dart';
 
 import '../hazards/municipalities.g.dart';
 import 'forecast_areas.g.dart';
@@ -77,7 +76,7 @@ class ForecastArea {
 /// camera parked over the Pacific should not confidently report Chiba's
 /// weather.
 ForecastArea? forecastAreaFor(LatLng at, {double maxKm = 150}) {
-  const dist = Distance();
+  const dist = Distance(calculator: Haversine());
   String? bestCode;
   var bestKm = double.infinity;
   for (final entry in forecastAreas.entries) {
@@ -230,21 +229,26 @@ class JmaForecastApi {
 
   final http.Client _client;
 
-  Future<Map<String, dynamic>> _getObject(String url) async {
-    final decoded = await _get(url);
-    if (decoded is! Map) throw JmaForecastException('$url: unexpected shape');
-    return decoded.cast<String, dynamic>();
-  }
+  Future<Map<String, dynamic>> _getObject(String url) => fetchFeed(
+    _client,
+    Uri.parse(url),
+    deadline: const Duration(seconds: 15),
+    resource: 'forecast',
+    error: JmaForecastException.new,
+    parse: (bytes) => decodeFeedJson<Map<String, dynamic>>(
+      bytes,
+      resource: url,
+      error: JmaForecastException.new,
+    ),
+  );
 
-  Future<dynamic> _get(String url) async {
-    final r = await _client
-        .get(Uri.parse(url))
-        .timeout(const Duration(seconds: 15));
-    if (r.statusCode != 200) {
-      throw JmaForecastException('forecast ${r.statusCode}');
-    }
-    return jsonDecode(utf8.decode(r.bodyBytes));
-  }
+  Future<List<dynamic>> _get(String url) => fetchFeedJson(
+    _client,
+    Uri.parse(url),
+    deadline: const Duration(seconds: 15),
+    resource: 'forecast',
+    error: JmaForecastException.new,
+  );
 
   /// Fetch the report covering [at]. Throws [JmaForecastException] if the
   /// position is outside Japan ([NoForecastAreaException]) or JMA returns

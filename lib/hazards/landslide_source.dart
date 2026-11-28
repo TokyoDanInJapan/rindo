@@ -1,4 +1,4 @@
-import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
@@ -7,6 +7,7 @@ import '../closures/feed_result.dart';
 import '../closures/road_closure.dart';
 import '../closures/search_area.dart';
 import '../net/feed_exception.dart';
+import '../net/feed_fetch.dart';
 import 'municipalities.g.dart';
 
 /// JMA 土砂災害警戒情報 (landslide alerts, issued jointly with prefectures).
@@ -39,15 +40,7 @@ class LandslideSource {
   /// Alerts in effect inside [area]. The map is one nationwide file, so a
   /// failed fetch falls back to the last one read, whatever area it served.
   Future<FeedResult> fetch(SearchArea area) async {
-    List<RoadClosure>? all;
-    Object? error;
-    try {
-      all = await _fetchAll();
-      _lastGood.put(null, all);
-    } catch (e) {
-      error = e;
-      all = _lastGood.get(null);
-    }
+    final (all, _, error) = await _lastGood.fetchOr(null, _fetchAll);
     return FeedResult(
       [
         for (final c in all ?? const <RoadClosure>[])
@@ -60,54 +53,83 @@ class LandslideSource {
     );
   }
 
-  /// Every alert in effect nationwide.
-  Future<List<RoadClosure>> _fetchAll() async {
-    final r = await _client
-        .get(Uri.parse(_url))
-        .timeout(const Duration(seconds: 15));
-    if (r.statusCode != 200) {
-      throw FeedException('JMA landslide', 'map ${r.statusCode}');
-    }
-    final doc = jsonDecode(utf8.decode(r.bodyBytes));
-    if (doc is! List) {
-      throw FeedException('JMA landslide', 'map: unexpected shape');
-    }
+  static FeedException _error(String message) =>
+      FeedException('JMA landslide', message);
 
-    final out = <RoadClosure>[];
+  /// Every alert in effect nationwide. Only plain bytes and the static parser
+  /// cross the isolate boundary; the client and cache stay on the UI isolate.
+  Future<List<RoadClosure>> _fetchAll() => fetchFeed(
+    _client,
+    Uri.parse(_url),
+    deadline: const Duration(seconds: 15),
+    resource: 'map',
+    error: _error,
+    parse: (bytes) => parseFeedBytes(bytes, _parseMap),
+  );
+
+  static List<RoadClosure> _parseMap(Uint8List bytes) {
+    final doc = decodeFeedJson<List<dynamic>>(
+      bytes,
+      resource: 'map',
+      error: _error,
+    );
+    final offices = parseFeedRecords(
+      doc,
+      _parseOffice,
+      resource: 'map',
+      error: _error,
+    );
     final seen = <String>{};
-    for (final office in doc) {
-      if (office is! Map) continue;
-      final reported = office['reportDatetime'] as String? ?? '';
-      final areaTypes = office['areaTypes'];
-      if (areaTypes is! List || areaTypes.isEmpty) continue;
-      // The last areaType level is the class20s, the municipalities.
-      final last = areaTypes.last;
-      final areas = last is Map ? last['areas'] : null;
-      if (areas is! List) continue;
-      for (final a in areas) {
-        if (a is! Map || a['warningCode'] != '3') continue;
-        final class20 = '${a['areaCode']}';
-        final code5 = class20.length >= 5 ? class20.substring(0, 5) : class20;
-        final m = municipalities[code5];
-        // Skip codes the baked table does not know, from post-merger drift.
-        if (m == null || !seen.add(code5)) continue;
-        final (name, lat, lon) = m;
-        out.add(
-          RoadClosure(
-            id: 'dosha-$code5',
-            point: LatLng(lat, lon),
-            roadName: name,
-            restriction: '土砂災害警戒情報',
-            cause: '大雨による土砂災害のおそれ（発表 $reported）',
-            sourceName: '気象庁 土砂災害警戒情報',
-            sourceUrl: Uri.parse(
-              'https://www.jma.go.jp/bosai/warning/'
-              '#area_type=class20s&area_code=$class20',
-            ),
-          ),
-        );
-      }
+    return [
+      for (final office in offices)
+        for (final alert in office)
+          if (seen.add(alert.id)) alert,
+    ];
+  }
+
+  static List<RoadClosure> _parseOffice(dynamic office) {
+    if (office is! Map) throw const FormatException('office is not an object');
+    final reported = office['reportDatetime'] as String? ?? '';
+    final areaTypes = office['areaTypes'];
+    if (areaTypes is! List || areaTypes.isEmpty) {
+      throw const FormatException('missing areaTypes');
     }
-    return out;
+    // The last areaType level is the class20s, the municipalities.
+    final last = areaTypes.last;
+    final areas = last is Map ? last['areas'] : null;
+    if (areas is! List) throw const FormatException('missing areas');
+    return parseFeedRecords(
+      areas,
+      (area) => _parseArea(area, reported),
+      resource: 'office areas',
+      error: _error,
+    );
+  }
+
+  static RoadClosure? _parseArea(dynamic area, String reported) {
+    if (area is! Map ||
+        area['warningCode'] is! String ||
+        area['areaCode'] is! String) {
+      throw const FormatException('missing warning or area code');
+    }
+    if (area['warningCode'] != '3') return null;
+    final class20 = area['areaCode'] as String;
+    final code5 = class20.length >= 5 ? class20.substring(0, 5) : class20;
+    final municipality = municipalities[code5];
+    // Skip codes the baked table does not know, from post-merger drift.
+    if (municipality == null) return null;
+    final (name, lat, lon) = municipality;
+    return RoadClosure(
+      id: 'dosha-$code5',
+      point: LatLng(lat, lon),
+      roadName: name,
+      restriction: '土砂災害警戒情報',
+      cause: '大雨による土砂災害のおそれ（発表 $reported）',
+      sourceName: '気象庁 土砂災害警戒情報',
+      sourceUrl: Uri.parse(
+        'https://www.jma.go.jp/bosai/warning/'
+        '#area_type=class20s&area_code=$class20',
+      ),
+    );
   }
 }

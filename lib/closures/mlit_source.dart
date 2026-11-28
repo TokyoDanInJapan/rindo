@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
 import '../net/feed_exception.dart';
+import '../net/feed_fetch.dart';
 import 'feed_result.dart';
 import 'geojson.dart';
 import 'road_closure.dart';
@@ -28,6 +29,7 @@ class MlitSource {
   static const _categories = ['TukoKisei', 'TokiTuko'];
   final http.Client _client;
   final LastGood<(int, String)> _lastGood;
+  final _pool = FeedPool();
 
   MlitSource(this._client, {DateTime Function()? now})
     : _lastGood = LastGood(now: now);
@@ -44,7 +46,7 @@ class MlitSource {
     var fellBack = false;
     final out = <RoadClosure>[];
     for (final parts in results) {
-      for (final (closures, fresh) in parts) {
+      for (final (closures, fresh, _) in parts) {
         if (!fresh) {
           failed++;
           fellBack |= closures != null;
@@ -67,46 +69,47 @@ class MlitSource {
 
   /// Both category files of one regional development bureau, each freshly
   /// fetched or else its last good copy. The flag says which.
-  Future<List<(List<RoadClosure>?, bool)>> _bureauOrLast(int bureau) async {
+  Future<List<(List<RoadClosure>?, bool, Object?)>> _bureauOrLast(
+    int bureau,
+  ) async {
     String? backup;
     try {
-      backup = await _fetchBackupPath(bureau);
+      backup = await _pool.run(() => _fetchBackupPath(bureau));
     } catch (_) {
       // Both categories fall back below.
     }
     return Future.wait([
       for (final category in _categories)
-        () async {
-          final key = (bureau, category);
-          if (backup != null) {
-            try {
-              final fresh = await _fetchCategory(backup, category, bureau);
-              _lastGood.put(key, fresh);
-              return (fresh, true);
-            } catch (_) {
-              // Counted by the caller, and reported as a missing file.
-            }
-          }
-          return (_lastGood.get(key), false);
-        }(),
+        _lastGood.fetchOr(
+          (bureau, category),
+          backup == null
+              ? null
+              : () =>
+                    _pool.run(() => _fetchCategory(backup!, category, bureau)),
+        ),
     ]);
   }
 
+  static FeedException _error(String message) => FeedException('MLIT', message);
+
   /// The regenerated data directory, scraped from the bureau's page. It
   /// throws when the page is unreachable or no longer names one.
-  Future<String> _fetchBackupPath(int bureau) async {
-    final page = await _client
-        .get(Uri.parse('$_base/pc/pcTukokisei_${bureau}_1.html'))
-        .timeout(const Duration(seconds: 15));
-    if (page.statusCode != 200) {
-      throw FeedException('MLIT', 'bureau $bureau page ${page.statusCode}');
-    }
-    final backup = _backupRe.firstMatch(page.body)?.group(0);
-    if (backup == null) {
-      throw FeedException('MLIT', 'bureau $bureau page: no data path');
-    }
-    return backup;
-  }
+  Future<String> _fetchBackupPath(int bureau) => fetchFeed(
+    _client,
+    Uri.parse('$_base/pc/pcTukokisei_${bureau}_1.html'),
+    deadline: const Duration(seconds: 15),
+    resource: 'bureau $bureau page',
+    error: _error,
+    parse: (bytes) {
+      // Only the ASCII script path matters here. A byte-preserving decode
+      // also accepts pages whose surrounding Japanese uses a legacy charset.
+      final backup = _backupRe.firstMatch(latin1.decode(bytes))?.group(0);
+      if (backup == null) {
+        throw _error('bureau $bureau page: no data path');
+      }
+      return backup;
+    },
+  );
 
   /// One category file. It throws when the file cannot be read, so the
   /// caller can fall back. A 404 is a category with nothing published.
@@ -114,37 +117,49 @@ class MlitSource {
     String backup,
     String category,
     int bureau,
-  ) async {
-    final r = await _client
-        .get(Uri.parse('$_base/$backup$category/$bureau.json'))
-        .timeout(const Duration(seconds: 15));
-    if (r.statusCode == 404) return const [];
-    if (r.statusCode != 200) {
-      throw FeedException('MLIT', '$category/$bureau ${r.statusCode}');
-    }
-    // Explicit UTF-8. package:http defaults to Latin-1 without a charset
-    // header, which mangles the Japanese field values.
-    final doc = jsonDecode(utf8.decode(r.bodyBytes));
-    if (doc is! Map) {
-      throw FeedException('MLIT', '$category/$bureau: unexpected shape');
-    }
-
-    final out = <RoadClosure>[];
-    for (final records in doc.values) {
-      if (records is! List) continue;
-      for (final rec in records) {
-        final c = _parseRecord(rec, category, bureau);
-        if (c != null) out.add(c);
+  ) => fetchFeed(
+    _client,
+    Uri.parse('$_base/$backup$category/$bureau.json'),
+    deadline: const Duration(seconds: 15),
+    resource: '$category/$bureau',
+    error: _error,
+    onNotFound: () => <RoadClosure>[],
+    parse: (bytes) {
+      final doc = decodeFeedJson<Map<String, dynamic>>(
+        bytes,
+        resource: '$category/$bureau',
+        error: _error,
+      );
+      // Records come in one list per prefecture. Anything else in the file is
+      // skipped, as before, so that a metadata field cannot turn a file with
+      // no closures into a rejected one. A file with entries but no lists at
+      // all has changed shape, and that is a failure.
+      final lists = [
+        for (final v in doc.values)
+          if (v is List) v,
+      ];
+      if (doc.isNotEmpty && lists.isEmpty) {
+        throw _error('$category/$bureau: unexpected shape');
       }
-    }
-    return out;
-  }
+      return parseFeedRecords(
+        [for (final records in lists) ...records],
+        (record) => _parseRecord(record, category, bureau),
+        resource: '$category/$bureau',
+        error: _error,
+      );
+    },
+  );
 
   RoadClosure? _parseRecord(dynamic rec, String category, int bureau) {
-    if (rec is! Map) return null;
+    if (rec is! Map) throw const FormatException('record is not an object');
 
     // TukoKisei mixes all regulation types, so keep only the impassable ones
     // (kisei_naiyo_cd '01' = 通行止). TokiTuko is winter closures, all kept.
+    if (category == 'TukoKisei' &&
+        rec['kisei_naiyo_cd'] is! String &&
+        rec['kisei_meisho'] is! String) {
+      throw const FormatException('missing regulation');
+    }
     final kiseiName = rec['kisei_meisho'] as String? ?? '';
     if (category == 'TukoKisei' &&
         rec['kisei_naiyo_cd'] != '01' &&
@@ -153,7 +168,7 @@ class MlitSource {
     }
 
     final point = _iconPoint(rec['iconData']);
-    if (point == null) return null;
+    if (point == null) throw const FormatException('missing closure point');
 
     final start = (rec['kisei_kaishi_chiten'] as String?)?.trim();
     final end = (rec['kisei_syuryo_chiten'] as String?)?.trim();
@@ -192,7 +207,14 @@ class MlitSource {
     if (p is! List || p.length < 2) return null;
     final lon = double.tryParse('${p[0]}');
     final lat = double.tryParse('${p[1]}');
-    if (lon == null || lat == null) return null;
+    if (lon == null ||
+        lat == null ||
+        !lon.isFinite ||
+        !lat.isFinite ||
+        lon.abs() > 180 ||
+        lat.abs() > 90) {
+      return null;
+    }
     return LatLng(lat, lon);
   }
 

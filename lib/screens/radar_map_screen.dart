@@ -142,7 +142,12 @@ class _RadarMapScreenState extends State<RadarMapScreen>
 
   // What the frame strip and the banners rebuild on, built once so the
   // scoped builders below keep their subscriptions across screen rebuilds.
-  late final _frameStripInputs = Listenable.merge([_assets, _radar]);
+  // The strip listens to the per-frame load states only, not to the monitor
+  // itself, which also notifies for every base-tile request.
+  late final _frameStripInputs = Listenable.merge([
+    _assets.frameStates,
+    _radar,
+  ]);
   late final _bannerInputs = Listenable.merge([_tileStatus, _radar]);
 
   @override
@@ -361,10 +366,10 @@ class _RadarMapScreenState extends State<RadarMapScreen>
           SafeArea(
             child: Column(
               children: [
-                // Rebuilds as tile fetches land, for the per-frame load dots,
-                // and as playback moves. It is scoped here so that neither the
-                // roughly 5 Hz asset chatter nor the frame ticks repaint the
-                // whole map stack.
+                // Rebuilds when a frame's load dot changes and as playback
+                // moves. It is scoped here so that the frame ticks do not
+                // repaint the whole map stack, and it ignores the base-tile
+                // traffic that the debug sheet's monitor also reports.
                 ListenableBuilder(
                   listenable: _frameStripInputs,
                   builder: (context, _) => FrameControls(
