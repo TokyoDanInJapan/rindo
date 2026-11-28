@@ -13,7 +13,13 @@ import 'package:rindo/closures/search_area.dart';
 import 'package:rindo/hazards/landslide_source.dart';
 
 final _japan = CircleArea(const LatLng(36, 138), 3000);
-const _backup = '<script src="../backup/20260713225000/x/init.js">';
+// The live feeds publish each update under a new path: a new JARTIC target, a
+// new MLIT backup directory. The sources reuse a file fetched under the same
+// path, so these fakes hand out a new path for every discovery request.
+var _snapshot = 0;
+String _backup() =>
+    '<script src="../backup/${20260713225000 + _snapshot++}/x/init.js">';
+Map<String, String> _target() => {'target': 'now${_snapshot++}'};
 final _feature = <String, dynamic>{
   'properties': {
     'cs': '01',
@@ -69,12 +75,10 @@ void main() {
         final client = MockClient((request) async {
           final path = request.url.path;
           if (path.endsWith('/target.json')) {
-            return discoveryDown
-                ? http.Response('', 503)
-                : _json({'target': 'now'});
+            return discoveryDown ? http.Response('', 503) : _json(_target());
           }
           if (path.contains('pcTukokisei_')) {
-            return http.Response(_backup, discoveryDown ? 503 : 200);
+            return http.Response(_backup(), discoveryDown ? 503 : 200);
           }
           if (path.endsWith('/R13.json') ||
               path.endsWith('/TukoKisei/83.json')) {
@@ -151,7 +155,7 @@ void main() {
           final client = MockClient((request) {
             final path = request.url.path;
             if (path.endsWith('/target.json')) {
-              return Future.value(_json({'target': 'now'}));
+              return Future.value(_json(_target()));
             }
             active++;
             if (active > peak) peak = active;
@@ -159,7 +163,7 @@ void main() {
             waiting.add((
               pending,
               path.contains('pcTukokisei_')
-                  ? http.Response(_backup, 200)
+                  ? http.Response(_backup(), 200)
                   : http.Response('', 404),
             ));
             return pending.future.whenComplete(() => active--);
@@ -200,7 +204,7 @@ void main() {
     Object body = {'updated': '20260717090000', '13_東京都': <dynamic>[]};
     final client = MockClient((request) async {
       final path = request.url.path;
-      if (path.contains('pcTukokisei_')) return http.Response(_backup, 200);
+      if (path.contains('pcTukokisei_')) return http.Response(_backup(), 200);
       if (path.endsWith('/TukoKisei/83.json')) return _json(body);
       return http.Response('', 404);
     });
@@ -280,7 +284,7 @@ void main() {
         var broken = false;
         final client = MockClient((request) async {
           if (request.url.path.endsWith('/target.json')) {
-            return _json({'target': 'now'});
+            return _json(_target());
           }
           final padding = large ? ' ' * (33 * 1024) : '';
           if (sourceName == 'landslide') {

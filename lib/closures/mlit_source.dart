@@ -30,6 +30,8 @@ class MlitSource {
   final http.Client _client;
   final LastGood<(int, String)> _lastGood;
   final _pool = FeedPool();
+  // A category file under one data path never changes, see [SnapshotCache].
+  final _files = SnapshotCache<List<RoadClosure>>();
 
   MlitSource(this._client, {DateTime Function()? now})
     : _lastGood = LastGood(now: now);
@@ -84,8 +86,12 @@ class MlitSource {
           (bureau, category),
           backup == null
               ? null
-              : () =>
-                    _pool.run(() => _fetchCategory(backup!, category, bureau)),
+              : () => _files.get(
+                  '$backup$category/$bureau',
+                  () => _pool.run(
+                    () => _fetchCategory(backup!, category, bureau),
+                  ),
+                ),
         ),
     ]);
   }
