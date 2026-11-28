@@ -157,6 +157,23 @@ void main() {
       monitor.dispose();
     });
 
+    test('a 304 Not Modified counts as ok, not as an HTTP error', () async {
+      final monitor = AssetMonitor();
+      final client = MonitoredClient(
+        MockClient((_) async => http.Response('', 304)),
+        monitor,
+      );
+      await client.get(
+        Uri.parse(
+          'https://www.jma.go.jp/bosai/warning/data/landslide/map.json',
+        ),
+      );
+      final t = monitor.stats[AssetKind.closures]!.all;
+      expect(t.ok, 1);
+      expect(t.httpError, 0);
+      monitor.dispose();
+    });
+
     test(
       'an aborted feed is its own deadline, so it counts as failed',
       () async {

@@ -34,6 +34,12 @@ class LandslideSource {
   final http.Client _client;
   final LastGood<void> _lastGood;
 
+  // The last map read, with its validators. The file changes only when an
+  // alert is issued or cleared, which can be months apart. Each refresh
+  // therefore asks JMA whether it changed, and a 304 costs no download and
+  // no parse.
+  Validated<List<RoadClosure>>? _map;
+
   LandslideSource(this._client, {DateTime Function()? now})
     : _lastGood = LastGood(now: now);
 
@@ -58,14 +64,19 @@ class LandslideSource {
 
   /// Every alert in effect nationwide. Only plain bytes and the static parser
   /// cross the isolate boundary; the client and cache stay on the UI isolate.
-  Future<List<RoadClosure>> _fetchAll() => fetchFeed(
-    _client,
-    Uri.parse(_url),
-    deadline: const Duration(seconds: 15),
-    resource: 'map',
-    error: _error,
-    parse: (bytes) => parseFeedBytes(bytes, _parseMap),
-  );
+  Future<List<RoadClosure>> _fetchAll() async {
+    final map = await fetchFeedIfChanged(
+      _client,
+      Uri.parse(_url),
+      previous: _map,
+      deadline: const Duration(seconds: 15),
+      resource: 'map',
+      error: _error,
+      parse: (bytes) => parseFeedBytes(bytes, _parseMap),
+    );
+    _map = map;
+    return map.value;
+  }
 
   static List<RoadClosure> _parseMap(Uint8List bytes) {
     final doc = decodeFeedJson<List<dynamic>>(

@@ -106,8 +106,14 @@ void main() {
   test('a JARTIC tile that fails falls back to the last good copy and says '
       'so', () async {
     var tileUp = true;
+    var target = 0;
     final source = JarticSource(
       MockClient((req) async {
+        // A new target per refresh, as the live feed publishes each update.
+        // Under an unchanged target the tile would come from memory.
+        if (req.url.path.endsWith('/target.json')) {
+          return http.Response('{"target":"20260717090${target++}"}', 200);
+        }
         if (!tileUp && req.url.path.contains('/d/301/R13.json')) {
           return http.Response('busy', 503);
         }
@@ -122,6 +128,33 @@ void main() {
     final second = await source.fetch(area);
     expect(second.closures, hasLength(3));
     expect(second.problems.single, contains('showing the last data received'));
+  });
+
+  test('a refetch under the same JARTIC target reuses the tiles it has, and '
+      'a new target fetches them again', () async {
+    var target = '202607170900';
+    final tiles = <String>[];
+    final source = JarticSource(
+      MockClient((req) async {
+        if (req.url.path.endsWith('/target.json')) {
+          return http.Response('{"target":"$target"}', 200);
+        }
+        if (req.url.path.contains('/d/301/')) tiles.add(req.url.path);
+        return _fakeResponse(req);
+      }),
+    );
+    final area = CircleArea(_shinjuku, 50);
+    final first = await source.fetch(area);
+    final fetched = tiles.length;
+    expect(fetched, greaterThan(0));
+
+    final again = await source.fetch(area);
+    expect(tiles, hasLength(fetched), reason: 'nothing downloaded again');
+    expect(again.closures.map((c) => c.id), first.closures.map((c) => c.id));
+
+    target = '202607170905';
+    await source.fetch(area);
+    expect(tiles, hasLength(fetched * 2), reason: 'a new target is new data');
   });
 
   test('an MLIT page with no data path is reported, not read as "no '

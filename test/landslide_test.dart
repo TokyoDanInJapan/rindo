@@ -53,6 +53,7 @@ http.Client _client({String body = _fixture, int status = 200}) =>
 const _kusatsu = LatLng(36.62, 138.60);
 
 void main() {
+  conditionalTests();
   test("only warningCode '3' municipalities become alerts", () async {
     // A circle wide enough to hold all of Japan.
     final result = await LandslideSource(
@@ -97,5 +98,64 @@ void main() {
     final (all, errors) = await repo.fetchNear(_kusatsu, 50);
     expect(all.where((c) => c.id.startsWith('dosha-')), isEmpty);
     expect(errors.join(), contains('土砂災害警戒情報'));
+  });
+}
+
+/// The map is fetched again on every refresh, but it changes only when an
+/// alert is issued or cleared. The source asks JMA whether it changed, and a
+/// 304 must reuse the copy it holds.
+void conditionalTests() {
+  group('conditional fetch', () {
+    final area = CircleArea(const LatLng(36.62, 138.6), 50);
+
+    test('a 304 reuses the map, and a changed map replaces it', () async {
+      final seen = <Map<String, String>>[];
+      var body = _fixture;
+      var etag = '"v1"';
+      final source = LandslideSource(
+        MockClient((req) async {
+          seen.add(req.headers);
+          if (req.headers['If-None-Match'] == etag) {
+            return http.Response('', 304);
+          }
+          return http.Response.bytes(
+            utf8.encode(body),
+            200,
+            headers: {
+              'etag': etag,
+              'last-modified': 'Wed, 27 May 2026 06:11:29 GMT',
+            },
+          );
+        }),
+      );
+
+      final first = await source.fetch(area);
+      expect(first.closures, hasLength(1));
+      expect(seen.single.containsKey('If-None-Match'), isFalse);
+
+      // Unchanged: the request carries both validators, and the 304 serves
+      // the same parsed list, with no problem reported.
+      final second = await source.fetch(area);
+      expect(seen.last['If-None-Match'], '"v1"');
+      expect(seen.last['If-Modified-Since'], 'Wed, 27 May 2026 06:11:29 GMT');
+      expect(second.problems, isEmpty);
+      expect(second.closures.single.id, first.closures.single.id);
+
+      // Changed: the alert was cleared, and the new version replaces the old.
+      body = '[]';
+      etag = '"v2"';
+      final third = await source.fetch(area);
+      expect(third.closures, isEmpty);
+      expect(third.problems, isEmpty);
+    });
+
+    test('a 304 without a copy to reuse is a failure', () async {
+      final source = LandslideSource(
+        MockClient((_) async => http.Response('', 304)),
+      );
+      final r = await source.fetch(area);
+      expect(r.closures, isEmpty);
+      expect(r.problems.single, contains('304'));
+    });
   });
 }

@@ -89,11 +89,15 @@ class AssetRequest {
   bool cancelled = false;
 
   bool get inFlight => endedAt == null;
+
+  /// A 304 Not Modified counts as ok. It is the answer to a conditional
+  /// request, see fetchFeedIfChanged, and means that the copy the app holds
+  /// is still current.
   bool get ok =>
       !cancelled &&
       error == null &&
       statusCode != null &&
-      statusCode! ~/ 100 == 2;
+      (statusCode! ~/ 100 == 2 || statusCode == 304);
 
   /// Compact display name: `base 6/56/25`, `radar 8/227/100 @0405`, or the
   /// host and last segment for the JSON and XML feeds.
