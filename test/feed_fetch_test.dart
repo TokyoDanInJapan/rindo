@@ -228,4 +228,53 @@ void main() {
       expect(empty.$2, isFalse);
     },
   );
+
+  group('SnapshotCache', () {
+    test('reuses an answer and shares a fetch that is still running', () async {
+      final cache = SnapshotCache<int>();
+      var calls = 0;
+      final gate = Completer<int>();
+      Future<int> slow() {
+        calls++;
+        return gate.future;
+      }
+
+      final a = cache.get('t1/R13', slow);
+      final b = cache.get('t1/R13', slow);
+      gate.complete(7);
+      expect(await a, 7);
+      expect(await b, 7);
+      expect(await cache.get('t1/R13', () async => -1), 7);
+      expect(calls, 1);
+      expect(await cache.get('t2/R13', () async => 8), 8, reason: 'new path');
+    });
+
+    test('does not keep a failure, so the next request tries again', () async {
+      final cache = SnapshotCache<int>();
+      await expectLater(
+        cache.get('t1/R13', () async => throw StateError('down')),
+        throwsStateError,
+      );
+      expect(await cache.get('t1/R13', () async => 3), 3);
+    });
+
+    test('expires entries, and drops the least recently used past the '
+        'limit', () async {
+      var now = DateTime(2026, 11, 29, 9);
+      final cache = SnapshotCache<int>(
+        limit: 2,
+        maxAge: const Duration(minutes: 30),
+        now: () => now,
+      );
+      await cache.get('a', () async => 1);
+      await cache.get('b', () async => 2);
+      await cache.get('a', () async => -1); // a is now the most recent
+      await cache.get('c', () async => 3); // so b goes
+      expect(await cache.get('a', () async => -1), 1);
+      expect(await cache.get('b', () async => 20), 20, reason: 'evicted');
+
+      now = now.add(const Duration(minutes: 31));
+      expect(await cache.get('a', () async => 10), 10, reason: 'expired');
+    });
+  });
 }

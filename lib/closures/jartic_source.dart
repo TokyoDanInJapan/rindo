@@ -32,6 +32,8 @@ class JarticSource {
   final http.Client _client;
   final LastGood<String> _lastGood;
   final _pool = FeedPool();
+  // A prefecture tile under one target never changes, see [SnapshotCache].
+  final _tiles = SnapshotCache<List<RoadClosure>>();
 
   JarticSource(this._client, {DateTime Function()? now})
     : _lastGood = LastGood(now: now);
@@ -67,7 +69,12 @@ class JarticSource {
       tiles.map(
         (t) => _lastGood.fetchOr(
           t,
-          target == null ? null : () => _pool.run(() => _fetchTile(target!, t)),
+          target == null
+              ? null
+              : () => _tiles.get(
+                  '$target/$t',
+                  () => _pool.run(() => _fetchTile(target!, t)),
+                ),
         ),
       ),
     );

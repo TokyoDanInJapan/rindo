@@ -23,24 +23,87 @@ Future<T> fetchFeed<T>(
   required FutureOr<T> Function(Uint8List bytes) parse,
   T Function()? onNotFound,
 }) async {
-  final abort = Completer<void>();
-  final request = http.AbortableRequest('GET', url, abortTrigger: abort.future);
-  final response =
-      await (() async {
-        final streamed = await client.send(request);
-        return http.Response.fromStream(streamed);
-      })().timeout(
-        deadline,
-        onTimeout: () {
-          abort.complete();
-          throw TimeoutException('$resource transfer', deadline);
-        },
-      );
+  final response = await _get(
+    client,
+    url,
+    deadline: deadline,
+    resource: resource,
+  );
   if (response.statusCode == 404 && onNotFound != null) return onNotFound();
   if (response.statusCode != 200) {
     throw error('$resource ${response.statusCode}');
   }
   return parse(response.bodyBytes);
+}
+
+/// A parsed feed file and the validators that its server sent with it, so
+/// that the next fetch can ask whether the file has changed. See
+/// [fetchFeedIfChanged].
+class Validated<T> {
+  const Validated(this.value, {this.etag, this.lastModified});
+
+  final T value;
+  final String? etag;
+  final String? lastModified;
+}
+
+/// Fetch [url] like [fetchFeed], but send the validators of [previous]. If
+/// the server answers 304 Not Modified, the file has not changed, so this
+/// returns [previous] and downloads and parses nothing.
+///
+/// Use it for a file that is fetched again and again under the same URL. The
+/// JMA landslide map, for example, is 144 KB and often unchanged for months.
+Future<Validated<T>> fetchFeedIfChanged<T>(
+  http.Client client,
+  Uri url, {
+  required Validated<T>? previous,
+  required Duration deadline,
+  required String resource,
+  required FeedError error,
+  required FutureOr<T> Function(Uint8List bytes) parse,
+}) async {
+  final etag = previous?.etag;
+  final lastModified = previous?.lastModified;
+  final response = await _get(
+    client,
+    url,
+    deadline: deadline,
+    resource: resource,
+    headers: {'If-None-Match': ?etag, 'If-Modified-Since': ?lastModified},
+  );
+  if (response.statusCode == 304 && previous != null) return previous;
+  if (response.statusCode != 200) {
+    throw error('$resource ${response.statusCode}');
+  }
+  return Validated(
+    await parse(response.bodyBytes),
+    etag: response.headers['etag'],
+    lastModified: response.headers['last-modified'],
+  );
+}
+
+/// One GET under [deadline], body included, which aborts the transfer when
+/// the deadline passes.
+Future<http.Response> _get(
+  http.Client client,
+  Uri url, {
+  required Duration deadline,
+  required String resource,
+  Map<String, String> headers = const {},
+}) {
+  final abort = Completer<void>();
+  final request = http.AbortableRequest('GET', url, abortTrigger: abort.future)
+    ..headers.addAll(headers);
+  return (() async {
+    final streamed = await client.send(request);
+    return http.Response.fromStream(streamed);
+  })().timeout(
+    deadline,
+    onTimeout: () {
+      abort.complete();
+      throw TimeoutException('$resource transfer', deadline);
+    },
+  );
 }
 
 /// Decode explicitly as UTF-8: feeds often omit the charset and http would
@@ -146,5 +209,56 @@ class FeedPool {
         _waiting.removeFirst().complete();
       }
     }
+  }
+}
+
+/// Parsed copies of feed files whose URL names a snapshot, such as JARTIC's
+/// `{target}/d/301/R20.json` or MLIT's `backup/{time}/{id}/TukoKisei/83.json`.
+/// A file under one snapshot never changes, so a second request for the same
+/// URL can reuse the first answer.
+///
+/// That saves downloads when a refetch follows soon after the last one: the
+/// retry after a partial failure, a dropped or cleared pin, a loaded route,
+/// the app coming back to the front, or the refresh button. A new snapshot
+/// gives new URLs, so it is always fetched.
+///
+/// Entries expire after [maxAge] all the same, in case a server ever rewrites
+/// a snapshot. The cache keeps at most [limit] entries, least recently used
+/// first out. A failed fetch is not kept, so the next request tries again.
+/// Concurrent requests for one URL share a single fetch.
+class SnapshotCache<V> {
+  SnapshotCache({
+    this.limit = 64,
+    this.maxAge = const Duration(minutes: 30),
+    DateTime Function()? now,
+  }) : _now = now ?? DateTime.now;
+
+  final int limit;
+  final Duration maxAge;
+  final DateTime Function() _now;
+  final _entries = <String, (DateTime, Future<V>)>{};
+
+  Future<V> get(String url, Future<V> Function() fetch) {
+    final hit = _entries.remove(url);
+    if (hit != null && _now().difference(hit.$1) < maxAge) {
+      _entries[url] = hit; // most recently used goes to the end
+      return hit.$2;
+    }
+    // The entry goes in before the fetch starts, so that a failure, even a
+    // synchronous one, always finds it and takes it out again.
+    final result = Completer<V>();
+    _entries[url] = (_now(), result.future);
+    while (_entries.length > limit) {
+      _entries.remove(_entries.keys.first);
+    }
+    unawaited(() async {
+      try {
+        result.complete(await fetch());
+      } catch (e, st) {
+        if (identical(_entries[url]?.$2, result.future)) _entries.remove(url);
+        result.completeError(e, st);
+      }
+    }());
+    return result.future;
   }
 }
