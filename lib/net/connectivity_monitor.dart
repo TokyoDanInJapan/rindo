@@ -35,6 +35,12 @@ class ConnectivityMonitor extends ChangeNotifier {
     });
   }
 
+  // Tile errors and index results arrive from requests that the screen's
+  // disposal is still closing. After dispose every entry point does nothing.
+  // Otherwise a late tile error would arm a 13 second timer whose callback
+  // notifies a disposed notifier, which throws in debug builds.
+  bool _disposed = false;
+
   final DateTime Function() _now;
 
   /// How long 'offline' persists after the last network-level tile failure.
@@ -67,6 +73,7 @@ class ConnectivityMonitor extends ChangeNotifier {
   /// ignored here. They are the tile-status monitor's business, not
   /// connectivity's.
   void recordTileError(Object error) {
+    if (_disposed) return;
     // Deadline timeouts are congestion, not lost connectivity. A saturated
     // per-host queue times tiles out while other requests on the same host
     // succeed, and a real outage surfaces as SocketExceptions anyway.
@@ -98,7 +105,7 @@ class ConnectivityMonitor extends ChangeNotifier {
   /// the layers so the holes refetch. It returns whether there *was* an
   /// outage, so the caller can reset its per-tile bookkeeping alongside.
   bool heal() {
-    if (_lastNetError == null) return false;
+    if (_disposed || _lastNetError == null) return false;
     _lastNetError = null;
     _recentNetErrors.clear();
     _hideTimer?.cancel();
@@ -110,17 +117,20 @@ class ConnectivityMonitor extends ChangeNotifier {
   /// Explicit retry, from a banner tap or the refresh button: re-key every
   /// tile layer.
   void bumpEpoch() {
+    if (_disposed) return;
     _tileEpoch++;
     notifyListeners();
   }
 
   void dismissOffline() {
+    if (_disposed) return;
     _offlineDismissed = true;
     notifyListeners();
   }
 
   @override
   void dispose() {
+    _disposed = true;
     _hideTimer?.cancel();
     _graceTimer?.cancel();
     super.dispose();

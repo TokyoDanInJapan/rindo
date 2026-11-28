@@ -145,6 +145,55 @@ void main() {
     expect(fetches, hasLength(3));
   });
 
+  test(
+    'in route mode a GPS fix does not refetch until the data is stale',
+    () async {
+      final (c, clock, fetches) = _build();
+      c.setRider(_home);
+      await pumpEventQueue();
+      c.loadRoute([_home, const LatLng(36.05, 138.0)]);
+      await pumpEventQueue();
+      expect(fetches, hasLength(2)); // the rider's fix, then the route
+
+      // Riding along the route: fix after fix, well over 10 km in all. The
+      // corridor does not move with the rider, so none of these refetch.
+      for (var i = 1; i <= 20; i++) {
+        clock.advance(const Duration(seconds: 30));
+        c.setRider(LatLng(36.0 + i * 0.01, 138.0));
+        await pumpEventQueue();
+      }
+      expect(fetches, hasLength(2));
+
+      // Past [ClosuresController.freshFor], the next fix refetches.
+      clock.advance(const Duration(minutes: 6));
+      c.setRider(const LatLng(36.21, 138.0));
+      await pumpEventQueue();
+      expect(fetches, hasLength(3));
+    },
+  );
+
+  test(
+    'only the first GPS fix notifies; later ones reach riderPosition',
+    () async {
+      final (c, _, _) = _build();
+      var notified = 0, moved = 0;
+      c.addListener(() => notified++);
+      c.riderPosition.addListener(() => moved++);
+
+      c.setRider(_home);
+      await pumpEventQueue();
+      expect(moved, 1);
+      final afterFirst = notified;
+      expect(afterFirst, greaterThan(0));
+
+      c.setRider(const LatLng(36.001, 138.0)); // a short move: no refetch
+      await pumpEventQueue();
+      expect(moved, 2);
+      expect(notified, afterFirst);
+      expect(c.rider, const LatLng(36.001, 138.0));
+    },
+  );
+
   test('pin overrides rider; clearing returns to the rider', () async {
     final (c, _, fetches) = _build();
     c.setRider(_home);

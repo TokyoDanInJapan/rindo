@@ -201,6 +201,32 @@ void main() {
     expect(repo.debugIsDuplicate(different, [mlit]), isFalse);
   });
 
+  test(
+    'haversine distances keep the 5 km dedupe boundary and road classes',
+    () {
+      RoadClosure closure(String road, double latitude) => RoadClosure(
+        id: '$road-$latitude',
+        point: LatLng(latitude, 139),
+        roadName: road,
+        restriction: '通行止',
+        sourceName: 'test',
+        sourceUrl: Uri.parse('https://example.com'),
+      );
+      final repo = ClosureRepository(client: _fake());
+      final original = closure('県道１６号', 35);
+      final near = closure('都道16号', 35.04);
+      final far = closure('府道16号', 35.05);
+      expect(original.distanceKmFrom(original.point), 0);
+      // Preserve the existing whole-kilometre rounding at the API boundary.
+      expect(near.distanceKmFrom(original.point), 4);
+      expect(far.distanceKmFrom(original.point), greaterThan(5));
+      expect(repo.debugIsDuplicate(near, [original]), isTrue);
+      expect(repo.debugIsDuplicate(far, [original]), isFalse);
+      expect(repo.debugIsDuplicate(closure('国道16号', 35), [original]), isFalse);
+      expect(repo.debugIsDuplicate(closure('道路名不明', 35), [original]), isFalse);
+    },
+  );
+
   test('an MLIT record without start, end or dates has no section or '
       'period, rather than empty ones', () async {
     final result = await MlitSource(

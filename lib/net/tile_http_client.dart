@@ -167,10 +167,50 @@ class _TimeoutClient extends BaseClient {
 
   @override
   Future<StreamedResponse> send(BaseRequest request) async {
-    final response = await _inner.send(request).timeout(_untilHeaders);
+    final deadlineAbort = Completer<void>();
+    final callerAbort = request is Abortable ? request.abortTrigger : null;
+    final abort = callerAbort == null
+        ? deadlineAbort.future
+        : Future.any([deadlineAbort.future, callerAbort]);
+    final response = await _inner
+        .send(_AbortableTileRequest(request, abort))
+        .timeout(
+          _untilHeaders,
+          onTimeout: () {
+            deadlineAbort.complete();
+            // Keep a deadline distinct from a caller cancellation. In
+            // particular it must not enter RetryClient's ClientException
+            // retry path, or flutter_map's transparent-tile cancellation path.
+            throw TimeoutException('Future not completed', _untilHeaders);
+          },
+        );
     return response.copyWithStream(response.stream.timeout(_betweenChunks));
   }
 
   @override
   void close() => _inner.close();
+}
+
+/// Add the per-attempt abort signal without buffering or changing the request
+/// body. RetryClient already provides a fresh body stream for each attempt.
+class _AbortableTileRequest extends BaseRequest with Abortable {
+  _AbortableTileRequest(this._original, this.abortTrigger)
+    : super(_original.method, _original.url) {
+    contentLength = _original.contentLength;
+    followRedirects = _original.followRedirects;
+    headers.addAll(_original.headers);
+    maxRedirects = _original.maxRedirects;
+    persistentConnection = _original.persistentConnection;
+  }
+
+  final BaseRequest _original;
+
+  @override
+  final Future<void> abortTrigger;
+
+  @override
+  ByteStream finalize() {
+    super.finalize();
+    return _original.finalize();
+  }
 }

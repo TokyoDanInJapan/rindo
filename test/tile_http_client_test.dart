@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -50,6 +51,29 @@ class _TruncatingClient extends http.BaseClient {
   }
 }
 
+/// Records the abort signal and request copy passed through RetryClient.
+class _AbortAwareClient extends http.BaseClient {
+  int attempts = 0;
+  bool aborted = false;
+  http.BaseRequest? sent;
+  List<int>? body;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    attempts++;
+    sent = request;
+    body = await request.finalize().toBytes();
+    final response = Completer<http.StreamedResponse>();
+    unawaited(
+      (request as http.Abortable).abortTrigger!.then((_) {
+        aborted = true;
+        response.completeError(http.RequestAbortedException(request.url));
+      }),
+    );
+    return response.future;
+  }
+}
+
 const _dropped = 'Connection closed before full header was received';
 const _url = 'https://tiles.example/{z}/{x}/{y}.png';
 
@@ -94,6 +118,79 @@ Future<List<Object>> tileErrors(WidgetTester t, http.Client transport) async {
 }
 
 void main() {
+  test(
+    'the header deadline aborts once and stays a timeout, without retrying',
+    () {
+      fakeAsync((clock) {
+        final transport = _AbortAwareClient();
+        final client = tileHttpClient(transport: transport);
+        Object? failure;
+        client
+            .get(Uri.parse('https://tiles.example/10/1/1.png'))
+            .then<void>(
+              (_) => fail('headers never arrive'),
+              onError: (Object error) => failure = error,
+            );
+        clock.flushMicrotasks();
+        clock.elapse(const Duration(seconds: 19));
+        expect(transport.aborted, isFalse);
+        clock.elapse(const Duration(seconds: 1));
+        expect(transport.aborted, isTrue);
+        expect(failure, isA<TimeoutException>());
+        clock.elapse(const Duration(minutes: 1));
+        expect(transport.attempts, 1);
+        expect(clock.nonPeriodicTimerCount, 0);
+        client.close();
+      });
+    },
+  );
+
+  test(
+    'caller abortion survives the deadline wrapper and preserves request data',
+    () {
+      fakeAsync((clock) {
+        final transport = _AbortAwareClient();
+        final client = tileHttpClient(transport: transport);
+        final abort = Completer<void>();
+        final request =
+            http.AbortableRequest(
+                'POST',
+                Uri.parse('https://tiles.example/tile'),
+                abortTrigger: abort.future,
+              )
+              ..body = 'tile body'
+              ..headers['x-tile'] = 'yes'
+              ..followRedirects = false
+              ..maxRedirects = 2
+              ..persistentConnection = false;
+        Object? failure;
+        client
+            .send(request)
+            .then<void>(
+              (_) => fail('headers never arrive'),
+              onError: (Object error) => failure = error,
+            );
+        clock.flushMicrotasks();
+        final forwarded = transport.sent!;
+        expect(forwarded.method, request.method);
+        expect(forwarded.url, request.url);
+        expect(forwarded.headers, request.headers);
+        expect(forwarded.contentLength, request.contentLength);
+        expect(forwarded.followRedirects, isFalse);
+        expect(forwarded.maxRedirects, 2);
+        expect(forwarded.persistentConnection, isFalse);
+        expect(transport.body, request.bodyBytes);
+        abort.complete();
+        clock.flushMicrotasks();
+        expect(transport.aborted, isTrue);
+        expect(failure, isA<http.RequestAbortedException>());
+        expect(transport.attempts, 1);
+        expect(clock.nonPeriodicTimerCount, 0);
+        client.close();
+      });
+    },
+  );
+
   group('a dropped connection is a failed tile, not an empty one', () {
     testWidgets('when it fails before the headers', (t) async {
       final errors = await tileErrors(

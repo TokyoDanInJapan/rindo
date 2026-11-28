@@ -123,6 +123,28 @@ void main() {
     expect(frames.map((f) => f.offsetMin), [-15, 0]);
   });
 
+  test(
+    'bad status and shape retain the radar exception type and label',
+    () async {
+      for (final (body, status, message) in [
+        ('busy', 503, 'targetTimes 503'),
+        ('{}', 200, 'targetTimes: unexpected shape'),
+      ]) {
+        final api = JmaApi(
+          client: MockClient((_) async => http.Response(body, status)),
+        );
+        await expectLater(
+          api.getFrames(),
+          throwsA(
+            isA<JmaException>()
+                .having((e) => e.source, 'source', 'JMA radar')
+                .having((e) => e.message, 'message', message),
+          ),
+        );
+      }
+    },
+  );
+
   test('a failed observed index is an error', () {
     expect(
       JmaApi(client: _fakeJma(observedDown: true)).getFrames(),

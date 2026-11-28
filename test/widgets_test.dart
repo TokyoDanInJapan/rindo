@@ -7,6 +7,7 @@ import 'package:http/testing.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rindo/closures/closure_repository.dart';
+import 'package:rindo/closures/road_closure.dart';
 import 'package:rindo/closures/seasonal_gates.dart';
 import 'package:rindo/jma/jma_api.dart';
 import 'package:rindo/net/asset_monitor.dart';
@@ -42,6 +43,9 @@ Future<MapController> pumpMap(
   List<(LatLng, bool)>? places,
   bool greyscale = false,
   http.Client? tiles,
+  Future<List<JmaFrame>> Function()? frames,
+  void Function(ClosuresController, RadarFrameController)? expose,
+  int tileEpoch = 0,
 }) async {
   final controller = MapController();
   final closures = ClosuresController(
@@ -57,23 +61,13 @@ Future<MapController> pumpMap(
   if (pin != null) closures.dropPin(pin);
   // Loaded once and never started: no playback or refresh timers.
   final radar = RadarFrameController(
-    loadFrames: () async => const [
-      JmaFrame(
-        basetime: '20260721110000',
-        validtime: '20260721110000',
-        offsetMin: 0,
-      ),
-      JmaFrame(
-        basetime: '20260721110000',
-        validtime: '20260721111500',
-        offsetMin: 15,
-      ),
-    ],
+    loadFrames: frames ?? () async => const [_frame0, _frame15],
     onLoaded: () {},
     onFramesReplaced: () {},
   );
   addTearDown(radar.dispose);
   await t.runAsync(radar.load);
+  expose?.call(closures, radar);
   await t.pumpWidget(
     MaterialApp(
       home: RadarMapView(
@@ -81,7 +75,7 @@ Future<MapController> pumpMap(
         closures: closures,
         httpClient: tiles ?? MockClient((_) async => http.Response('nf', 404)),
         radar: radar,
-        tileEpoch: 0,
+        tileEpoch: tileEpoch,
         greyscale: greyscale,
         initialCenter: const LatLng(35, 137),
         initialZoom: 10,
@@ -97,6 +91,26 @@ Future<MapController> pumpMap(
   );
   return controller;
 }
+
+const _frame0 = JmaFrame(
+  basetime: '20260721110000',
+  validtime: '20260721110000',
+  offsetMin: 0,
+);
+const _frame15 = JmaFrame(
+  basetime: '20260721110000',
+  validtime: '20260721111500',
+  offsetMin: 15,
+);
+const _frame30 = JmaFrame(
+  basetime: '20260721110000',
+  validtime: '20260721113000',
+  offsetMin: 30,
+);
+
+/// Rebuilds the map view in place, as a screen setState does.
+void _rebuildMap(WidgetTester t) =>
+    t.element(find.byType(RadarMapView)).markNeedsBuild();
 
 MapBanners _banners({
   bool offline = false,
@@ -697,6 +711,169 @@ void main() {
     });
   });
 
+  group('radar staged mounting', () {
+    TileLayer layerFor(WidgetTester t, JmaFrame f) => t.widget<TileLayer>(
+      find.byWidgetPredicate(
+        (w) => w is TileLayer && w.urlTemplate == f.urlTemplate,
+      ),
+    );
+
+    testWidgets('a preload mounted ahead of the active frame does not '
+        'rebuild the active layer', (t) async {
+      // Seek before the first build, so the active frame is the second one
+      // and the preload mounts the first *ahead* of it in the stack.
+      await pumpMap(t, expose: (_, r) => r.seek(1));
+      expect(find.byType(TileLayer), findsNWidgets(2)); // base + active
+      final before = t.element(
+        find.byWidget(layerFor(t, _frame15), skipOffstage: false),
+      );
+      await t.pump(const Duration(seconds: 2)); // the preload mounts frame 0
+      expect(find.byType(TileLayer), findsNWidgets(3)); // base + 2 radar
+      final after = t.element(
+        find.byWidget(layerFor(t, _frame15), skipOffstage: false),
+      );
+      expect(identical(before, after), isTrue, reason: 'same element');
+      await t.pump(const Duration(milliseconds: 300));
+    });
+
+    testWidgets('frames that join behind the same first frame still preload', (
+      t,
+    ) async {
+      // The forecast index failed on the first load, so only the observed
+      // frame came back. The next load adds forecast frames behind it.
+      var set = const [_frame0];
+      late RadarFrameController radar;
+      await pumpMap(t, frames: () async => set, expose: (_, r) => radar = r);
+      await t.pump(const Duration(seconds: 2));
+      expect(find.byType(TileLayer), findsNWidgets(2)); // base + 1 radar
+
+      set = const [_frame0, _frame15, _frame30];
+      await t.runAsync(radar.load);
+      await t.pump();
+      await t.pump(const Duration(seconds: 4));
+      expect(
+        find.byType(TileLayer),
+        findsNWidgets(4),
+        reason: 'the new frames preload without waiting for playback',
+      );
+      await t.pump(const Duration(milliseconds: 300));
+    });
+  });
+
+  group('rebuild cost', () {
+    // flutter_map's polyline layer drops its projection cache on every
+    // update. These layers must come back as the identical widget on a
+    // rebuild, or every screen setState re-projects the ~30,000-point
+    // prefecture outline and every closure line.
+    testWidgets('a rebuild keeps the polyline and closure layers', (t) async {
+      await pumpMap(t, rider: const LatLng(35, 137));
+      await t.pump();
+      List<Widget> layers() => [
+        ...t.widgetList(find.byType(PolylineLayer)),
+        t.widget(find.byKey(const ValueKey('closure-markers'))),
+      ];
+      final before = layers();
+      _rebuildMap(t);
+      await t.pump();
+      final after = layers();
+      expect(after.length, before.length);
+      for (var i = 0; i < before.length; i++) {
+        expect(identical(before[i], after[i]), isTrue, reason: 'layer $i');
+      }
+      await t.pump(const Duration(seconds: 2));
+    });
+
+    testWidgets('a tile epoch bump re-keys the base layer, so failed base '
+        'tiles refetch', (t) async {
+      Element base() => t.element(
+        find.byWidgetPredicate(
+          (w) => w is TileLayer && w.minNativeZoom != w.maxNativeZoom,
+        ),
+      );
+      await pumpMap(t);
+      final first = base();
+      await pumpMap(t);
+      expect(
+        identical(base(), first),
+        isTrue,
+        reason: 'same epoch, same layer',
+      );
+      await pumpMap(t, tileEpoch: 1);
+      expect(identical(base(), first), isFalse, reason: 'a new epoch re-keys');
+      await t.pump(const Duration(seconds: 2));
+    });
+
+    testWidgets('a scheduled closure turns active on time, with no rebuild '
+        'from the screen', (t) async {
+      late ClosuresController closures;
+      await pumpMap(t, expose: (c, _) => closures = c);
+      // The view reads the wall clock, which the test binding does not fake,
+      // so the window opens a moment of real time from now.
+      final opens = DateTime.now().add(const Duration(milliseconds: 500));
+      closures.translation.setSource([
+        RoadClosure(
+          id: 'gate',
+          point: const LatLng(35, 137),
+          roadName: '国道1号',
+          restriction: '通行止',
+          sourceName: 'test',
+          sourceUrl: Uri.parse('https://example.com'),
+          validFrom: opens,
+        ),
+      ]);
+      _rebuildMap(t); // the screen's rebuild for the new list
+      await t.pump();
+      Color? marker() => t
+          .widget<Icon>(
+            find.descendant(
+              of: find.byKey(const ValueKey('closure-markers')),
+              matching: find.byType(Icon),
+            ),
+          )
+          .color;
+      expect(marker(), Colors.indigo.shade400, reason: 'scheduled');
+
+      await t.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 600)),
+      );
+      await t.pump(const Duration(seconds: 2)); // the view's own timer fires
+      expect(marker(), Colors.red.shade700, reason: 'active now');
+    });
+
+    testWidgets('a GPS fix moves the rider dot without notifying the screen', (
+      t,
+    ) async {
+      late ClosuresController closures;
+      await pumpMap(
+        t,
+        rider: const LatLng(35, 137),
+        expose: (c, _) => closures = c,
+      );
+      await t.pump();
+      var notified = 0;
+      closures.addListener(() => notified++);
+
+      const moved = LatLng(35.001, 137.001);
+      closures.setRider(moved);
+      await t.pump();
+      expect(
+        notified,
+        0,
+        reason:
+            'a short move neither refetches nor '
+            'rebuilds the screen',
+      );
+      final rider = t.widget<MarkerLayer>(
+        find.descendant(
+          of: find.byKey(const ValueKey('rider')),
+          matching: find.byType(MarkerLayer),
+        ),
+      );
+      expect(rider.markers.single.point, moved);
+      await t.pump(const Duration(seconds: 2));
+    });
+  });
+
   group('offscreen layers', () {
     // Impeller on Vulkan aborts the app when it cannot allocate an offscreen
     // texture for a nested layer, and the Pixel 10's PowerVR GPU runs out
@@ -791,8 +968,8 @@ void main() {
       await pumpMap(t, rider: spot, places: places);
       await t.pumpAndSettle();
 
-      // The dot has no icon to find; it's the only marker on the map.
-      await t.tap(find.byType(MarkerLayer));
+      // The dot has no icon to find; it has a layer of its own.
+      await t.tap(find.byKey(const ValueKey('rider')));
       await t.pumpAndSettle();
       expect(places, [(spot, false)]);
     });

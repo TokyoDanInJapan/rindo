@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -156,6 +157,26 @@ void main() {
       monitor.dispose();
     });
 
+    test(
+      'an aborted feed is its own deadline, so it counts as failed',
+      () async {
+        final monitor = AssetMonitor();
+        final client = MonitoredClient(
+          MockClient((_) async => throw http.RequestAbortedException()),
+          monitor,
+        );
+        await expectLater(
+          client.get(Uri.parse('https://www.jartic.or.jp/d/traffic_info/r1/x')),
+          throwsA(isA<http.RequestAbortedException>()),
+        );
+        final s = monitor.stats[AssetKind.closures]!;
+        expect(s.all.failed, 1);
+        expect(s.all.cancelled, 0);
+        expect(s.lastError, contains('deadline'));
+        monitor.dispose();
+      },
+    );
+
     test('resetCounters zeroes tallies and the log', () async {
       final monitor = AssetMonitor();
       final client = MonitoredClient(
@@ -224,6 +245,209 @@ void main() {
     );
   });
 
+  group('frameStates', () {
+    const valid = '20260720041500';
+    Uri radar(int z, [String y = '100']) => Uri.parse(
+      '$jmaBase/20260720040000/none/$valid/surf/hrpns/$z/227/$y.png',
+    );
+    const tick = Duration(milliseconds: 250);
+
+    test('base-tile traffic notifies the monitor but never frameStates', () {
+      fakeAsync((async) {
+        final monitor = AssetMonitor();
+        var all = 0, frames = 0;
+        monitor.addListener(() => all++);
+        monitor.frameStates.addListener(() => frames++);
+
+        for (var i = 0; i < 20; i++) {
+          final r = monitor.begin(_cyclosm(8, 227, '$i'));
+          monitor.headersReceived(r, 200);
+          monitor.done(r);
+          async.elapse(tick);
+        }
+        expect(all, greaterThan(0));
+        expect(frames, 0);
+        monitor.dispose();
+      });
+    });
+
+    test('notifies once per coalesced state change, not once per tile', () {
+      fakeAsync((async) {
+        final monitor = AssetMonitor();
+        var frames = 0;
+        monitor.frameStates.addListener(() => frames++);
+
+        // A burst of tiles starts: pending -> loading, one notify.
+        final tiles = [
+          for (var i = 0; i < 30; i++) monitor.begin(radar(8, '$i')),
+        ];
+        expect(frames, 0, reason: 'coalesced, not synchronous');
+        async.elapse(tick);
+        expect(frames, 1);
+        expect(monitor.frameState(valid, 8), FrameLoadState.loading);
+
+        // All but one finish: the frame is still loading, so no notify.
+        for (final r in tiles.skip(1)) {
+          monitor.headersReceived(r, 200);
+          monitor.done(r);
+        }
+        async.elapse(tick);
+        expect(frames, 1);
+
+        // The last one lands: loading -> loaded.
+        monitor.done(tiles.first..statusCode = 200);
+        async.elapse(tick);
+        expect(frames, 2);
+        expect(monitor.frameState(valid, 8), FrameLoadState.loaded);
+
+        // A frame that goes loaded, loading, loaded inside one window still
+        // notifies. The strip also rebuilds on playback, so it may have shown
+        // the loading state in between, and must not be left showing it.
+        final extra = monitor.begin(radar(8, 'extra'));
+        monitor.headersReceived(extra, 200);
+        monitor.done(extra);
+        async.elapse(tick);
+        expect(frames, 3);
+
+        // A failure flips it: loaded -> failed.
+        monitor.fail(monitor.begin(radar(8, 'bad')), 'boom');
+        async.elapse(tick);
+        expect(frames, 4);
+        expect(monitor.frameState(valid, 8), FrameLoadState.failed);
+
+        // The reset sends it back to pending, and a reset with nothing to
+        // forget is silent.
+        monitor.resetRadarFrames();
+        async.elapse(tick);
+        expect(frames, 5);
+        monitor.resetRadarFrames();
+        async.elapse(tick);
+        expect(frames, 5);
+        monitor.dispose();
+      });
+    });
+
+    test('a cancelled tile returns the frame to pending and says so', () {
+      fakeAsync((async) {
+        final monitor = AssetMonitor();
+        var frames = 0;
+        monitor.frameStates.addListener(() => frames++);
+        final r = monitor.begin(radar(8));
+        async.elapse(tick);
+        expect(frames, 1);
+        monitor.cancel(r);
+        async.elapse(tick);
+        expect(frames, 2);
+        expect(monitor.frameState(valid, 8), FrameLoadState.pending);
+        monitor.dispose();
+      });
+    });
+
+    test('the in-flight count holds loading until the last tile of that '
+        'frame and zoom ends', () {
+      final monitor = AssetMonitor();
+      final a = monitor.begin(radar(8, 'a'));
+      final b = monitor.begin(radar(8, 'b'));
+      final other = monitor.begin(radar(6, 'c'));
+      monitor.done(a..statusCode = 200);
+      expect(monitor.frameState(valid, 8), FrameLoadState.loading);
+      monitor.done(b..statusCode = 200);
+      monitor.done(b); // a second completion must not count twice
+      expect(monitor.frameState(valid, 8), FrameLoadState.loaded);
+      expect(monitor.frameState(valid, 6), FrameLoadState.loading);
+      // The reset forgets outcomes, not what is still on the wire.
+      monitor.resetRadarFrames();
+      expect(monitor.frameState(valid, 6), FrameLoadState.loading);
+      monitor.cancel(other);
+      expect(monitor.frameState(valid, 6), FrameLoadState.pending);
+      monitor.dispose();
+    });
+  });
+
+  group('after dispose', () {
+    const valid = '20260720041500';
+    final radar = Uri.parse(
+      '$jmaBase/20260720040000/none/$valid/surf/hrpns/8/227/100.png',
+    );
+
+    test('every entry point is a no-op: no timer, no notify, no throw', () {
+      fakeAsync((async) {
+        final monitor = AssetMonitor();
+        final open = monitor.begin(radar);
+        final openBase = monitor.begin(_cyclosm(6, 56, '25'));
+        async.elapse(const Duration(seconds: 1));
+
+        var notified = 0;
+        monitor.addListener(() => notified++);
+        monitor.frameStates.addListener(() => notified++);
+        // A notify timer is armed at the moment of disposal.
+        monitor.headersReceived(open, 200);
+        monitor.dispose();
+        expect(async.pendingTimers, isEmpty);
+
+        // The clients close, and their requests complete late.
+        monitor.headersReceived(openBase, 200);
+        monitor.done(open);
+        monitor.fail(openBase, 'Connection closed');
+        monitor.cancel(open);
+        final late = monitor.begin(radar);
+        monitor.headersReceived(late, 200);
+        monitor.done(late);
+        monitor.resetRadarFrames();
+        monitor.resetCounters();
+        monitor.dispose();
+
+        expect(async.pendingTimers, isEmpty);
+        async.elapse(const Duration(seconds: 5));
+        expect(notified, 0);
+        expect(monitor.inFlight, isEmpty);
+        expect(monitor.stats[AssetKind.radarTile]!.all.total, 0);
+      });
+    });
+
+    test('a MonitoredClient request that completes after dispose still '
+        'delivers its body', () async {
+      final monitor = AssetMonitor();
+      final body = StreamController<List<int>>();
+      final client = MonitoredClient(_StreamingClient(body.stream), monitor);
+      final res = await client.send(http.Request('GET', radar));
+      monitor.dispose();
+
+      final bytes = res.stream.toBytes();
+      body.add([1, 2, 3]);
+      await body.close();
+      expect(await bytes, [1, 2, 3]);
+      // And a request started after dispose passes straight through.
+      final after = await client.send(http.Request('GET', radar));
+      expect(after.statusCode, 200);
+    });
+  });
+
+  group('MonitoredClient forwarding', () {
+    test('hands the inner client the identical request object', () async {
+      // An AbortableRequest carries its abort trigger on the object, so a
+      // copy would silently lose cancellation.
+      final monitor = AssetMonitor();
+      final inner = _RecordingClient();
+      final client = MonitoredClient(inner, monitor);
+
+      final plain = http.Request('GET', _cyclosm(6, 56, '25'));
+      final abortable = http.AbortableRequest(
+        'GET',
+        _cyclosm(6, 56, '26'),
+        abortTrigger: Completer<void>().future,
+      );
+      await client.send(plain);
+      await client.send(abortable);
+
+      expect(inner.seen, hasLength(2));
+      expect(identical(inner.seen[0], plain), isTrue);
+      expect(identical(inner.seen[1], abortable), isTrue);
+      expect(inner.seen[1], isA<http.Abortable>());
+      monitor.dispose();
+    });
+  });
+
   group('buildAssetDebugReport', () {
     test('summarises screen state and network tallies', () async {
       final monitor = AssetMonitor();
@@ -281,6 +505,16 @@ void main() {
       monitor.dispose();
     });
   });
+}
+
+class _RecordingClient extends http.BaseClient {
+  final seen = <http.BaseRequest>[];
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    seen.add(request);
+    return http.StreamedResponse(const Stream.empty(), 200);
+  }
 }
 
 class _StreamingClient extends http.BaseClient {

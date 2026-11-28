@@ -21,9 +21,10 @@ RoadClosure _closure(String road) => RoadClosure(
 /// Deterministic, no platform channels: "translates" by prefixing. A gate
 /// (when provided) holds every translation until the test releases it.
 class _FakeTranslator extends JaEnTranslator {
-  _FakeTranslator({this.gate});
+  _FakeTranslator({this.gate, this.fail = false});
 
   final Completer<void>? gate;
+  final bool fail;
 
   @override
   Future<bool> ensureReady() async => true;
@@ -31,6 +32,7 @@ class _FakeTranslator extends JaEnTranslator {
   @override
   Future<RoadClosure> translateClosure(RoadClosure c) async {
     if (gate != null) await gate!.future;
+    if (fail) throw StateError('translator blew up');
     return RoadClosure(
       id: c.id,
       point: c.point,
@@ -142,6 +144,49 @@ void main() {
     await pumpEventQueue();
     expect(t.translating, isFalse);
     expect(t.shown.single.roadName, 'EN:国道1号');
+    t.dispose();
+  });
+
+  test('a translation that lands after dispose neither notifies nor '
+      'throws', () async {
+    final gate = Completer<void>();
+    final t = TranslationController(
+      translator: _FakeTranslator(gate: gate),
+      english: true,
+    );
+    var notifications = 0;
+    t.addListener(() => notifications++);
+    t.setSource([_closure('国道1号')]);
+    final before = notifications;
+
+    t.dispose();
+    gate.complete();
+    // An unhandled async error here would fail the test.
+    await pumpEventQueue();
+    expect(notifications, before);
+  });
+
+  // A download that lands after dispose is covered in
+  // translate_ja_en_translator_test.dart, against the real translator class.
+  test('dispose disposes the translator once, and twice is harmless', () async {
+    final translator = _FakeTranslator();
+    final t = TranslationController(translator: translator, english: false);
+    t.dispose();
+    // A disposed translator answers with the original and sends nothing.
+    expect(await translator.translateText('x'), 'x');
+    t.dispose();
+  });
+
+  test('a translator that throws leaves the originals on screen and no '
+      'unhandled error', () async {
+    final t = TranslationController(
+      translator: _FakeTranslator(fail: true),
+      english: true,
+    );
+    t.setSource([_closure('国道1号')]);
+    await pumpEventQueue();
+    expect(t.shown.single.roadName, '国道1号');
+    expect(t.translating, isFalse);
     t.dispose();
   });
 }
