@@ -6,6 +6,7 @@ import 'package:flutter_file_dialog/flutter_file_dialog.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:http/io_client.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../closures/closure_repository.dart';
@@ -29,6 +30,7 @@ import 'radar_map/radar_frame_controller.dart';
 import 'radar_map/radar_legend.dart';
 import 'radar_map/radar_map_view.dart';
 import 'radar_map/weather_sheet.dart';
+import '../net/tile_disk_cache.dart';
 import '../net/tile_http_client.dart';
 import '../net/tile_status.dart';
 
@@ -60,7 +62,16 @@ class _RadarMapScreenState extends State<RadarMapScreen>
   // It is injected so that flutter_map does not close it when a layer re-keys.
   // This screen owns its lifecycle. The deadline is what stops a stalled tile
   // from hanging forever, see tile_http_client.dart.
-  late final _tileClient = MonitoredClient(tileHttpClient(), _assets);
+  //
+  // The disk cache wraps the monitored client, so a tile served from disk
+  // never shows as network traffic in the debug sheet. It keeps CyclOSM tiles
+  // only, see tile_disk_cache.dart. It lives in the app's cache directory,
+  // which the system may clear when storage runs low.
+  late final _tileCache = TileDiskCache(getApplicationCacheDirectory());
+  late final _tileClient = CachingTileClient(
+    MonitoredClient(tileHttpClient(), _assets),
+    _tileCache,
+  );
 
   // Shared client for the JSON and XML feeds: JMA targetTimes and the closures
   // sources. Each fetch has its own deadline, but a deadline only stops the
@@ -169,6 +180,8 @@ class _RadarMapScreenState extends State<RadarMapScreen>
     );
     _radar.start();
     unawaited(_location.start());
+    // Take the tile cache back under its size limit from the last session.
+    unawaited(_tileCache.trim(force: true));
     // First launch only: the data-limits warning, before the map is usable.
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => showFirstRunDisclaimer(context),
@@ -496,6 +509,7 @@ class _RadarMapScreenState extends State<RadarMapScreen>
       offlineDismissed: _connectivity.offlineDismissed,
       tileEpoch: _connectivity.tileEpoch,
       reconnectAttempt: _radar.reconnectAttempt,
+      tileCache: '${_tileClient.stats}',
       failedTileCount: _tileStatus.failedCount,
       lastTileError: _tileStatus.lastError,
       frames: _radar.frames,

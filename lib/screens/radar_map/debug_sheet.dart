@@ -17,6 +17,9 @@ class DebugScreenState {
   final bool offlineDismissed;
   final int tileEpoch;
   final int reconnectAttempt;
+
+  /// The base-map disk cache's counters, see TileCacheStats.
+  final String? tileCache;
   final int failedTileCount;
   final String? lastTileError;
   final List<JmaFrame> frames;
@@ -42,6 +45,7 @@ class DebugScreenState {
     this.offlineDismissed = false,
     this.tileEpoch = 0,
     this.reconnectAttempt = 0,
+    this.tileCache,
     this.failedTileCount = 0,
     this.lastTileError,
     this.frames = const [],
@@ -132,6 +136,7 @@ String buildAssetDebugReport({
     b.writeln('  last tile err ${err(s.lastTileError)}');
   }
   b.writeln('  reconnect     attempt ${s.reconnectAttempt}');
+  if (s.tileCache != null) b.writeln('  map cache     ${s.tileCache}');
   b.writeln(
     '  location      ${s.hasFix ? 'fix ok' : 'no fix'}'
     ' · error ${err(s.locationError)}',
